@@ -2,7 +2,8 @@ FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /backup
+# Useing chinese mirror
+RUN sed -i "s@http://deb.debian.org@http://mirrors.aliyun.com@g" /etc/apt/sources.list && rm -Rf /var/lib/apt/lists/* && apt-get update
 
 # Install Packages
 RUN \
@@ -12,6 +13,8 @@ RUN \
     apt-get -y --auto-remove purge curl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+WORKDIR /backup
 
 # RClone Config file
 ENV RCLONE_CONFIG=/backup/rclone/rclone.conf
