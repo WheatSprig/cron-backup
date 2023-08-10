@@ -2,20 +2,41 @@ FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+WORKDIR /backup
+
 # Install Packages
 RUN \
     apt-get update && \
-    apt install rclone -y && \
+    apt install -y --no-install-recommends curl && \
+    curl -fsSL https://rclone.org/install.sh | bash - && \
+    apt-get -y --auto-remove purge curl && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # RClone Config file
-ENV RCLONE_CONFIG=/rclone.conf
+ENV RCLONE_CONFIG=/backup/rclone/rclone.conf
 
-COPY entrypoint.sh /
-COPY generate-config.sh /
-COPY backup.sh /
+# Create the default user
+ARG UID=1000
+ARG GID=1000
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN \
+    apt-get update && \
+    echo "Etc/UTC" > /etc/localtime && \
+    apt-get -y --no-install-recommends install whois wget && \
+    addgroup --gid $GID maisui && \
+    useradd -m -u $UID -g $GID -d /backup maisui && \
+    echo "maisui:$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 24 | mkpasswd -s -m sha-256)" | chpasswd && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN chmod +x /entrypoint.sh /generate-config.sh /backup.sh
+COPY --chown=maisui:maisui entrypoint.sh /
+COPY --chown=maisui:maisui generate-config.sh /backup/
+COPY --chown=maisui:maisui backup.sh /backup/
+
+RUN chmod +x /entrypoint.sh /backup/generate-config.sh /backup/backup.sh
+
+# Set the run user
+USER maisui
 
 ENTRYPOINT /entrypoint.sh
