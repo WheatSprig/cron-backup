@@ -1,38 +1,31 @@
-#!/bin/sh -e
+#!/bin/sh
+set -e
 
-# default storage class to standard if not provided
-S3_STORAGE_CLASS=${S3_STORAGE_CLASS:-STANDARD}
+# 归档文件名
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+ARCHIVE_NAME="backup_${TIMESTAMP}.tar.gz"
+ARCHIVE_PATH="/tmp/${ARCHIVE_NAME}"
 
-# generate file name for tar
-FILE_NAME=/tmp/$BACKUP_PREFIX-`date "+%Y-%m-%d_%H-%M-%S"`.tar.gz
+# 源目录（挂载点）
+SRC_DIR="${BACKUP_SRC:-/data}"
 
-# Check if TARGET variable is set
-if [[ -z ${TARGET} ]];
-then
-    echo "TARGET env var is not set so we use the default value (/data)"
-    TARGET=/data
-else
-    echo "TARGET env var is set"
-fi
+echo "📦 正在打包目录: $SRC_DIR"
+tar -czf "$ARCHIVE_PATH" -C "$SRC_DIR" .
 
-if [ -z "${S3_ENDPOINT}" ]; then
-  AWS_ARGS=""
-else
-  AWS_ARGS="--endpoint-url ${S3_ENDPOINT}"
-fi
+echo "✅ 本地归档完成: $ARCHIVE_PATH"
 
-echo "creating archive"
-tar -zcvf $FILE_NAME $TARGET
-echo "uploading archive to S3 [$FILE_NAME, storage class - $S3_STORAGE_CLASS]"
-aws s3 $AWS_ARGS cp --storage-class $S3_STORAGE_CLASS $FILE_NAME $S3_BUCKET_URL
+# 上传到所有 remote
+RCLONE_REMOTE_NAMES="${RCLONE_REMOTE_NAMES:-backup}"
+IFS=',' read -ra REMOTES <<< "$RCLONE_REMOTE_NAMES"
 
-rclone copy $FILE_NAME s3:$BUCKET_NAME/$TARGET
+for NAME in "${REMOTES[@]}"; do
+  DEST="${NAME}:${RCLONE_PATH:-/backups}/${ARCHIVE_NAME}"
+  echo "🚀 上传到 $DEST"
+  rclone copy "$ARCHIVE_PATH" "$DEST" --config="/config/rclone.conf" --progress
+done
 
-echo "removing local archive"
-rm $FILE_NAME
-echo "done"
+# 本地清理
+echo "🧹 清理本地归档: $ARCHIVE_PATH"
+rm -f "$ARCHIVE_PATH"
 
-if [ -n "$WEBHOOK_URL" ]; then
-    echo "notifying ${WEBHOOK_URL}"
-    curl -m 10 --retry 5 $WEBHOOK_URL
-fi
+echo "✅ 所有上传任务完成"
