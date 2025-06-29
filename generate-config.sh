@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 CONFIG_PATH="/config/rclone.conf"
@@ -13,30 +13,50 @@ IFS=',' read -ra REMOTES <<< "$RCLONE_REMOTE_NAMES"
 
 for NAME in "${REMOTES[@]}"; do
   TYPE_VAR="RCLONE_${NAME}_TYPE"
-  TYPE="${!TYPE_VAR}"
+  eval "TYPE=\$$TYPE_VAR"
 
   echo "[$NAME]" >> "$CONFIG_PATH"
   echo "type=$TYPE" >> "$CONFIG_PATH"
 
   case "$TYPE" in
     s3)
-      echo "provider=${!RCLONE_${NAME}_PROVIDER}" >> "$CONFIG_PATH"
-      echo "env_auth=${!RCLONE_${NAME}_ENV_AUTH:-false}" >> "$CONFIG_PATH"
-      echo "access_key_id=${!RCLONE_${NAME}_ACCESS_KEY_ID}" >> "$CONFIG_PATH"
-      echo "secret_access_key=${!RCLONE_${NAME}_SECRET_ACCESS_KEY}" >> "$CONFIG_PATH"
-      echo "region=${!RCLONE_${NAME}_REGION:-us-east-1}" >> "$CONFIG_PATH"
-      echo "endpoint=${!RCLONE_${NAME}_ENDPOINT}" >> "$CONFIG_PATH"
+      eval "provider=\$RCLONE_${NAME}_PROVIDER"
+      eval "env_auth=\${RCLONE_${NAME}_ENV_AUTH:-false}"
+      eval "access_key_id=\$RCLONE_${NAME}_ACCESS_KEY_ID"
+      eval "secret_access_key=\$RCLONE_${NAME}_SECRET_ACCESS_KEY"
+      eval "region=\${RCLONE_${NAME}_REGION:-us-east-1}"
+      eval "endpoint=\$RCLONE_${NAME}_ENDPOINT"
+      eval "acl=\${RCLONE_${NAME}_ACL:-private}"
+      eval "no_check_bucket=\${RCLONE_${NAME}_NO_CHECK_BUCKET:-true}"
+
+      echo "provider=$provider" >> "$CONFIG_PATH"
+      echo "env_auth=$env_auth" >> "$CONFIG_PATH"
+      echo "access_key_id=$access_key_id" >> "$CONFIG_PATH"
+      echo "secret_access_key=$secret_access_key" >> "$CONFIG_PATH"
+      echo "region=$region" >> "$CONFIG_PATH"
+      echo "endpoint=$endpoint" >> "$CONFIG_PATH"
+      echo "acl=$acl" >> "$CONFIG_PATH"
+      echo "no_check_bucket=$no_check_bucket" >> "$CONFIG_PATH"
       ;;
     sftp)
-      echo "host=${!RCLONE_${NAME}_HOST}" >> "$CONFIG_PATH"
-      echo "user=${!RCLONE_${NAME}_USER}" >> "$CONFIG_PATH"
-      echo "pass=${!RCLONE_${NAME}_PASS}" >> "$CONFIG_PATH"
-      echo "port=${!RCLONE_${NAME}_PORT:-22}" >> "$CONFIG_PATH"
+      eval "host=\$RCLONE_${NAME}_HOST"
+      eval "user=\$RCLONE_${NAME}_USER"
+      eval "pass=\$RCLONE_${NAME}_PASS"
+      eval "port=\${RCLONE_${NAME}_PORT:-22}"
+
+      echo "host=$host" >> "$CONFIG_PATH"
+      echo "user=$user" >> "$CONFIG_PATH"
+      echo "pass=$pass" >> "$CONFIG_PATH"
+      echo "port=$port" >> "$CONFIG_PATH"
       ;;
     drive)
-      echo "client_id=${!RCLONE_${NAME}_CLIENT_ID}" >> "$CONFIG_PATH"
-      echo "client_secret=${!RCLONE_${NAME}_CLIENT_SECRET}" >> "$CONFIG_PATH"
-      echo "token=${!RCLONE_${NAME}_TOKEN}" >> "$CONFIG_PATH"
+      eval "client_id=\$RCLONE_${NAME}_CLIENT_ID"
+      eval "client_secret=\$RCLONE_${NAME}_CLIENT_SECRET"
+      eval "token=\$RCLONE_${NAME}_TOKEN"
+
+      echo "client_id=$client_id" >> "$CONFIG_PATH"
+      echo "client_secret=$client_secret" >> "$CONFIG_PATH"
+      echo "token=$token" >> "$CONFIG_PATH"
       ;;
     *)
       echo "❌ 不支持的 RCLONE 类型: $TYPE"

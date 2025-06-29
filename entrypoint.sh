@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 echo "🔧 正在生成 rclone 配置..."
-sh /generate-config.sh
+bash /backup/generate-config.sh
 
 # 默认路径，方便可替换
-BACKUP_SCRIPT="/backup.sh"
+BACKUP_SCRIPT="/backup/backup.sh"
 
 # 日志目标，默认为控制台
 LOG_FILE="/var/log/backup.log"
@@ -25,7 +25,7 @@ if [ -n "$CRON_SCHEDULE" ]; then
   echo "$CRON_SCHEDULE root $BACKUP_SCRIPT >> /var/log/cron.log 2>&1" > /etc/crontabs/root
 
   echo "📦 立即执行一次备份..."
-  sh "$BACKUP_SCRIPT"
+  bash "$BACKUP_SCRIPT"
 
   echo "🚀 启动 crond"
   crond -f
@@ -34,10 +34,10 @@ elif [ -n "$INTERVAL_SECONDS" ]; then
 
   while true; do
     echo "📦 执行备份 at $(date)"
-    sh "$BACKUP_SCRIPT"
+    bash "$BACKUP_SCRIPT"
     sleep "$INTERVAL_SECONDS"
   done
 else
   echo "⚠️ 未设置 CRON_SCHEDULE 或 INTERVAL_SECONDS，默认执行一次备份"
-  sh "$BACKUP_SCRIPT"
+  bash "$BACKUP_SCRIPT"
 fi

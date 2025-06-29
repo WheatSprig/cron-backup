@@ -2,15 +2,11 @@ FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 使用中国镜像源
-RUN sed -i "s@http://deb.debian.org@http://mirrors.aliyun.com@g" /etc/apt/sources.list && \
-    rm -Rf /var/lib/apt/lists/* && apt-get update
-
 # 安装所需组件并安装 rclone
 RUN apt-get update && \
-    apt install -y --no-install-recommends curl ca-certificates gnupg cron && \
+    apt install -y --no-install-recommends curl ca-certificates gnupg cron unzip && \
     curl -fsSL https://rclone.org/install.sh | bash - && \
-    apt-get purge -y curl && \
+    apt-get purge -y curl unzip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

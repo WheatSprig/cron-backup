@@ -1,0 +1,73 @@
+version: "3"
+
+# 项目提供多种运行模式：定时备份 / 循环间隔 / 只运行一次
+# 每个服务对应一种运行模式，根据需求启用其中一个即可
+
+services:
+  # ✅ 模式一：使用 CRON 表达式定时备份（推荐）
+  cron-backup-cron:
+    image: cron-backup
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - ./data:/backup/data            # 本地需要备份的数据目录
+      - ./config:/config               # 存储 rclone 配置等信息
+    environment:
+      - CRON_SCHEDULE=0 2 * * *        # 每天凌晨2点执行一次备份
+      - BACKUP_SRC=/backup/data        # 可选，备份源目录，默认就是 /backup/data
+      - RCLONE_REMOTE_NAMES=backup     # remote 名称，可多个逗号分隔
+      - RCLONE_backup_TYPE=s3
+      - RCLONE_backup_ACCESS_KEY_ID=xxx
+      - RCLONE_backup_SECRET_ACCESS_KEY=yyy
+      - RCLONE_backup_REGION=us-east-1
+      - RCLONE_backup_BUCKET=mybucket
+      - RCLONE_backup_PATH=/daily      # 上传到远程的目录（可选）
+      - RCLONE_backup_PROVIDER=AWS     # 可选，S3兼容服务如MinIO可写为Minio等
+      - RCLONE_backup_ENDPOINT=https://s3.example.com
+      - LOG_TARGET=console             # 控制台输出日志，也可以设置为 file
+      - UID=1000                       # 可选，容器运行用户UID
+      - GID=1000                       # 可选，容器运行用户GID
+
+  # ✅ 模式二：使用时间间隔定期循环备份
+  cron-backup-loop:
+    image: cron-backup
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - ./data:/backup/data
+      - ./config:/config
+    environment:
+      - INTERVAL_SECONDS=3600          # 每隔一小时备份一次
+      - RCLONE_REMOTE_NAMES=backup
+      - RCLONE_backup_TYPE=sftp
+      - RCLONE_backup_HOST=example.com
+      - RCLONE_backup_PORT=22
+      - RCLONE_backup_USER=your_user
+      - RCLONE_backup_PASS=your_password
+      - LOG_TARGET=file                # 输出到 /var/log/backup.log
+      - UID=1000
+      - GID=1000
+
+  # ✅ 模式三：启动时只运行一次备份（用于 CI/CD 或手动触发）
+  cron-backup-once:
+    image: cron-backup
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/backup/data
+      - ./config:/config
+    environment:
+      - RCLONE_REMOTE_NAMES=backup
+      - RCLONE_backup_TYPE=drive
+      - RCLONE_backup_CLIENT_ID=xxx
+      - RCLONE_backup_CLIENT_SECRET=yyy
+      - RCLONE_backup_TOKEN=zzz
+      - LOG_TARGET=console
+      - UID=1000
+      - GID=1000
+    command: ["/backup/backup.sh"]     # 直接执行备份脚本，执行完即退出
