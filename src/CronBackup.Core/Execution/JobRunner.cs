@@ -95,12 +95,6 @@ public sealed class JobRunner
         }
 
         var dryRun = options.DryRun || config.Defaults.DryRun == true;
-        if (dryRun)
-        {
-            _logger.LogInformation("dry-run enabled, skipping archive and remote operations: {Job}", job.Name);
-            return new JobRunResult(job.Name, JobRunStatus.Success, null, Array.Empty<DestinationRunResult>(), null);
-        }
-
         var timezone = ResolveTimezone(job.Timezone ?? config.Defaults.Timezone ?? "UTC");
         var now = _timeProvider.GetUtcNow();
         var localNow = TimeZoneInfo.ConvertTime(now, timezone);
@@ -108,6 +102,15 @@ public sealed class JobRunner
         var hookTimeout = TimeSpan.FromSeconds(hooks?.TimeoutSeconds ?? 300);
         var notifyTargets = job.Notify ?? config.Defaults.Notify;
         var archiveOptions = job.Archive ?? config.Defaults.Archive;
+
+        // dry-run 不打包、不执行 hook、不写远端，但会列一遍远端并返回
+        // 「将上传 / 将提升 / 将删除」的预览，和 prune 的 dry-run 体验保持一致。
+        if (dryRun)
+        {
+            _logger.LogInformation("dry-run enabled, previewing without archive or remote changes: {Job}", job.Name);
+            return await PreviewAsync(config, job, now, timezone, archiveOptions, cancellationToken);
+        }
+
         var tempDirectory = string.IsNullOrWhiteSpace(archiveOptions?.TempDir)
             ? Path.GetTempPath()
             : archiveOptions!.TempDir!;
@@ -224,6 +227,118 @@ public sealed class JobRunner
             destinationResults,
             error,
             destinationResults.Sum(result => result.PendingDeletes));
+    }
+
+    private async Task<JobRunResult> PreviewAsync(
+        RootConfig config,
+        JobConfig job,
+        DateTimeOffset now,
+        TimeZoneInfo timezone,
+        ArchiveOptions? archiveOptions,
+        CancellationToken cancellationToken)
+    {
+        var fileName = ArchiveNaming.FileName(
+            TimeZoneInfo.ConvertTime(now, timezone),
+            archiveOptions?.Format);
+        var results = new List<DestinationRunResult>();
+        var failures = new List<string>();
+
+        foreach (var destination in job.Destinations)
+        {
+            try
+            {
+                await using var backend = await _storageFactory.CreateAsync(
+                    job,
+                    destination,
+                    cancellationToken);
+                var key = $"daily/{fileName}";
+                var promoted = new List<string>();
+                var deleted = new List<string>();
+                var pendingDeletes = 0;
+
+                var policy = RetentionResolver.Resolve(
+                    config.Defaults.Retention,
+                    job.Retention,
+                    destination.Retention);
+
+                if (policy.Enabled)
+                {
+                    var weekly = await backend.ListAsync("weekly", cancellationToken);
+                    var monthly = await backend.ListAsync("monthly", cancellationToken);
+                    var promotion = RetentionPlanner.BuildPromotion(
+                        policy,
+                        weekly,
+                        monthly,
+                        now,
+                        timezone);
+
+                    if (promotion.Weekly && await backend.StatAsync(
+                            $"weekly/{fileName}",
+                            cancellationToken) is null)
+                    {
+                        promoted.Add($"weekly/{fileName}");
+                    }
+
+                    if (promotion.Monthly && await backend.StatAsync(
+                            $"monthly/{fileName}",
+                            cancellationToken) is null)
+                    {
+                        promoted.Add($"monthly/{fileName}");
+                    }
+
+                    var prune = await RetentionExecutor.BuildPlanAsync(
+                        backend,
+                        policy,
+                        now,
+                        timezone,
+                        key,
+                        cancellationToken,
+                        new RemoteObject(key, 0, now));
+                    deleted.AddRange(prune.Prune
+                        .SelectMany(item => item.ToDelete)
+                        .Select(item => item.Key));
+                    pendingDeletes = prune.PendingDeletes;
+                }
+
+                results.Add(new DestinationRunResult(
+                    destination.Name,
+                    true,
+                    new[] { key },
+                    promoted,
+                    deleted,
+                    null,
+                    pendingDeletes));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "dry-run preview failed: job={Job} destination={Destination}",
+                    job.Name,
+                    destination.Name);
+                results.Add(new DestinationRunResult(
+                    destination.Name,
+                    false,
+                    Array.Empty<string>(),
+                    Array.Empty<string>(),
+                    Array.Empty<string>(),
+                    exception.Message));
+                failures.Add($"{destination.Name}: {exception.Message}");
+            }
+        }
+
+        var success = failures.Count == 0 && results.All(result => result.Success);
+        return new JobRunResult(
+            job.Name,
+            success ? JobRunStatus.Success : JobRunStatus.Failed,
+            fileName,
+            results,
+            success ? null : string.Join("; ", failures),
+            results.Sum(result => result.PendingDeletes));
     }
 
     private async Task UpdateHealthAsync(

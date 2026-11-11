@@ -17,11 +17,20 @@ public static class RetentionExecutor
         DateTimeOffset now,
         TimeZoneInfo timezone,
         string? currentKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RemoteObject? pendingObject = null)
     {
-        var daily = await backend.ListAsync("daily", cancellationToken);
+        IReadOnlyList<RemoteObject> daily = await backend.ListAsync("daily", cancellationToken);
         var weekly = await backend.ListAsync("weekly", cancellationToken);
         var monthly = await backend.ListAsync("monthly", cancellationToken);
+
+        // dry-run 预览时对象还没上传，把它作为虚拟对象参与保留计算，
+        // 否则 latest N 天会把「将上传的这一份」漏掉。
+        if (pendingObject is not null &&
+            daily.All(item => !string.Equals(item.Key, pendingObject.Key, StringComparison.Ordinal)))
+        {
+            daily = daily.Append(pendingObject).ToList();
+        }
 
         return RetentionPlanner.BuildPlan(
             policy,

@@ -479,11 +479,12 @@ public static class CliApplication
         IReadOnlyList<JobRunResult> results,
         TextWriter output)
     {
+        var dryRun = options.DryRun || config.Defaults.DryRun == true;
         if (options.Json)
         {
             await output.WriteLineAsync(JsonSerializer.Serialize(new
             {
-                dryRun = options.DryRun || config.Defaults.DryRun == true,
+                dryRun,
                 jobs = results.Select(result => new
                 {
                     name = result.JobName,
@@ -508,7 +509,9 @@ public static class CliApplication
 
         foreach (var result in results)
         {
-            await output.WriteLineAsync($"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}");
+            await output.WriteLineAsync(
+                $"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}" +
+                (dryRun ? " (dry-run)" : string.Empty));
             if (!string.IsNullOrEmpty(result.ArchiveName))
             {
                 await output.WriteLineAsync($"  archive: {result.ArchiveName}");
