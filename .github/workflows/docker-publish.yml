@@ -47,9 +47,13 @@ jobs:
           if [[ "${{ github.ref_type }}" != "tag" ]]; then
             echo "tags=${IMAGE}:edge" >> "$GITHUB_OUTPUT"
           elif [[ "$REF" == *-* ]]; then
-            echo "tags=${IMAGE}:${REF}" >> "$GITHUB_OUTPUT"
+            # 预发布只推完整版本（含 v），不更新 latest/major。
+            echo "tags=${IMAGE}:${REF},${IMAGE}:${REF#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "tags=${IMAGE}:${REF},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+            VERSION="${REF#v}"
+            MAJOR="${VERSION%%.*}"
+            MINOR="${VERSION%.*}"
+            echo "tags=${IMAGE}:${REF},${IMAGE}:${VERSION},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push
