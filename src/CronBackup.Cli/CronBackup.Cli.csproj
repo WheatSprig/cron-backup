@@ -10,4 +10,8 @@
     <ProjectReference Include="..\CronBackup.Core\CronBackup.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+  </ItemGroup>
+
 </Project>

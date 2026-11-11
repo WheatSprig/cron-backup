@@ -98,18 +98,39 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
-    public async Task Run_ShouldReportNotImplemented()
+    public async Task RunOnce_ShouldBackupToLocalDestination()
     {
+        using var temp = new TestTempDirectory();
+        var source = Path.Combine(temp.Path, "source");
+        var destination = Path.Combine(temp.Path, "remote");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "data.txt"), "data");
+        var jobName = $"photos-{Guid.NewGuid():N}";
+        var config = $"""
+            version: 1
+            jobs:
+              - name: {jobName}
+                source:
+                  path: "{source.Replace('\\', '/')}"
+                destinations:
+                  - name: local
+                    kind: local
+                    path: "{destination.Replace('\\', '/')}"
+            """;
+        var path = temp.WriteFile("config.yaml", config);
+        var output = new StringWriter();
         var error = new StringWriter();
 
         var exitCode = await CliApplication.RunAsync(
-            ["run"],
-            new StringWriter(),
+            ["run", "--once", "--config", path, "--log-level", "error"],
+            output,
             error,
             CancellationToken.None);
 
-        Assert.Equal(3, exitCode);
-        Assert.Contains("not implemented", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exitCode);
+        Assert.Contains("success", output.ToString(), StringComparison.Ordinal);
+        Assert.Single(Directory.GetFiles(Path.Combine(destination, "daily"), "*.tar.gz"));
+        Assert.DoesNotContain("error:", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

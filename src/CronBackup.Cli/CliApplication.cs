@@ -2,7 +2,10 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using CronBackup.Core.Configuration;
+using CronBackup.Core.Execution;
 using CronBackup.Core.Retention;
+using CronBackup.Core.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace CronBackup.Cli;
 
@@ -46,7 +49,7 @@ public static class CliApplication
                 "validate" => await ValidateAsync(options, standardOutput, standardError, cancellationToken),
                 "plan" => await PlanAsync(options, standardOutput, standardError, cancellationToken),
                 "list" => await ListAsync(options, standardOutput, standardError, cancellationToken),
-                "run" => await NotImplementedAsync("run", standardOutput, standardError),
+                "run" => await RunCommandAsync(options, standardOutput, standardError, cancellationToken),
                 "prune" => await NotImplementedAsync("prune", standardOutput, standardError),
                 "restore" => await NotImplementedAsync("restore", standardOutput, standardError),
                 "health" => await NotImplementedAsync("health", standardOutput, standardError),
@@ -276,6 +279,138 @@ public static class CliApplication
         cancellationToken.ThrowIfCancellationRequested();
         return 0;
     }
+
+    private static async Task<int> RunCommandAsync(
+        CliOptions options,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var loaded = Load(options);
+        var validation = new ConfigValidator().Validate(loaded.Config);
+        WriteWarnings(loaded, validation, error);
+
+        if (!validation.IsValid)
+        {
+            foreach (var validationError in validation.Errors)
+            {
+                await error.WriteLineAsync($"error: {validationError.Path}: {validationError.Message}");
+            }
+
+            return 2;
+        }
+
+        var jobs = FilterJobs(loaded.Config, options.Job);
+        if (jobs.Count == 0)
+        {
+            await error.WriteLineAsync($"error: job '{options.Job}' not found");
+            return 2;
+        }
+
+        if (!options.Once && jobs.Any(job => job.Schedule is not null || job.IntervalSeconds is not null))
+        {
+            await error.WriteLineAsync("error: daemon scheduling is not implemented in this build; use --once");
+            return 1;
+        }
+
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(ParseLogLevel(options.LogLevel));
+            builder.AddConsole(console =>
+            {
+                console.LogToStandardErrorThreshold = LogLevel.Trace;
+            });
+        });
+
+        using var httpClient = new HttpClient();
+        var processRunner = new SystemProcessRunner();
+        var runner = new JobRunner(
+            new TarArchiveService(processRunner),
+            new DefaultStorageBackendFactory(),
+            new FileJobLockFactory(),
+            new HookRunner(processRunner, loggerFactory.CreateLogger<HookRunner>()),
+            new HttpNotifier(httpClient),
+            loggerFactory.CreateLogger<JobRunner>());
+
+        var results = new List<JobRunResult>();
+        foreach (var job in jobs)
+        {
+            results.Add(await runner.RunAsync(
+                loaded.Config,
+                job,
+                new JobRunOptions(options.DryRun),
+                cancellationToken));
+        }
+
+        if (options.Json)
+        {
+            await output.WriteLineAsync(JsonSerializer.Serialize(new
+            {
+                dryRun = options.DryRun || loaded.Config.Defaults.DryRun == true,
+                jobs = results.Select(result => new
+                {
+                    name = result.JobName,
+                    status = result.Status.ToString().ToLowerInvariant(),
+                    archive = result.ArchiveName,
+                    error = result.Error,
+                    destinations = result.Destinations.Select(destination => new
+                    {
+                        name = destination.Name,
+                        success = destination.Success,
+                        uploaded = destination.Uploaded,
+                        promoted = destination.Promoted,
+                        deleted = destination.Deleted,
+                        error = destination.Error,
+                    }),
+                }),
+            }, JsonOptions));
+        }
+        else
+        {
+            foreach (var result in results)
+            {
+                await output.WriteLineAsync($"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}");
+                if (!string.IsNullOrEmpty(result.ArchiveName))
+                {
+                    await output.WriteLineAsync($"  archive: {result.ArchiveName}");
+                }
+
+                foreach (var destination in result.Destinations)
+                {
+                    await output.WriteLineAsync(
+                        $"  {destination.Name}: {(destination.Success ? "ok" : "failed")} " +
+                        $"uploaded={destination.Uploaded.Count} promoted={destination.Promoted.Count} deleted={destination.Deleted.Count}");
+                    if (destination.Error is not null)
+                    {
+                        await output.WriteLineAsync($"    error: {destination.Error}");
+                    }
+                }
+
+                if (result.Error is not null && result.Destinations.All(destination => destination.Error is null))
+                {
+                    await output.WriteLineAsync($"  error: {result.Error}");
+                }
+            }
+        }
+
+        if (results.Any(result => result.Status == JobRunStatus.Locked))
+        {
+            return 4;
+        }
+
+        return results.All(result => result.Status is JobRunStatus.Success or JobRunStatus.Skipped) ? 0 : 3;
+    }
+
+    private static LogLevel ParseLogLevel(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            "trace" => LogLevel.Trace,
+            "debug" => LogLevel.Debug,
+            "warning" or "warn" => LogLevel.Warning,
+            "error" => LogLevel.Error,
+            "critical" => LogLevel.Critical,
+            _ => LogLevel.Information,
+        };
 
     private static async Task<int> NotImplementedAsync(
         string command,
