@@ -420,13 +420,32 @@ public sealed class JobRunner
 
         if (string.Equals(verifyMode, "checksum", StringComparison.OrdinalIgnoreCase))
         {
+            var localHash = await ComputeMd5Async(archive.ArchivePath, cancellationToken);
             var remoteHash = await backend.GetHashAsync(key, cancellationToken);
             if (remoteHash is null)
             {
-                throw new NotSupportedException($"remote checksum is not available for {key}");
+                // 有些后端（例如 SFTP）不提供远端 MD5。此时下载回读一遍做校验，
+                // 代价是双倍传输，但能兑现“上传后校验”的承诺。
+                var temporaryPath = Path.Combine(
+                    archive.DirectoryPath,
+                    $".verify-{Guid.NewGuid():N}");
+                try
+                {
+                    await _retryPolicy.ExecuteAsync(
+                        token => backend.DownloadAsync(key, temporaryPath, token),
+                        ShouldRetry,
+                        cancellationToken);
+                    remoteHash = await ComputeMd5Async(temporaryPath, cancellationToken);
+                }
+                finally
+                {
+                    if (File.Exists(temporaryPath))
+                    {
+                        File.Delete(temporaryPath);
+                    }
+                }
             }
 
-            var localHash = await ComputeMd5Async(archive.ArchivePath, cancellationToken);
             if (!string.Equals(remoteHash, localHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
