@@ -344,7 +344,7 @@ public static class CliApplication
                 try
                 {
                     builder.AddProvider(new FileLoggerProvider(
-                        Environment.GetEnvironmentVariable("LOG_FILE") ?? "/var/log/backup.log",
+                        Environment.GetEnvironmentVariable("LOG_FILE") ?? "/var/log/cron-backup/backup.log",
                         logLevel));
                     return;
                 }

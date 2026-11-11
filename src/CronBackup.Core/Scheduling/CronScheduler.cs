@@ -26,20 +26,13 @@ public sealed class CronScheduler
         Func<JobConfig, CancellationToken, Task> runJob,
         CancellationToken cancellationToken)
     {
-        var tasks = config.Jobs
-            .Where(job => job.IsEnabled)
-            .Select(job => RunJobLoopAsync(job, config.Defaults.Timezone, runJob, cancellationToken))
-            .ToArray();
-
-        if (tasks.Length == 0)
+        var jobs = config.Jobs.Where(job => job.IsEnabled).ToArray();
+        if (jobs.Length == 0)
         {
             return;
         }
 
         var now = _timeProvider.GetUtcNow();
-        using var heartbeatSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var heartbeatTask = HeartbeatAsync(heartbeatSource.Token);
-
         if (_healthStore is not null)
         {
             await _healthStore.WriteAsync(
@@ -53,6 +46,12 @@ public sealed class CronScheduler
                 },
                 cancellationToken);
         }
+
+        using var heartbeatSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var heartbeatTask = HeartbeatAsync(heartbeatSource.Token);
+        var tasks = jobs
+            .Select(job => RunJobLoopAsync(job, config.Defaults.Timezone, runJob, cancellationToken))
+            .ToArray();
 
         try
         {
