@@ -86,6 +86,8 @@ mkdir -p \
     "$TEST_ROOT/sftp-data" \
     "$TEST_ROOT/restore/s3" \
     "$TEST_ROOT/restore/sftp"
+# 容器内应用用户 UID 1000 要往 /restore 写；CI runner 的 UID 不一定是 1000。
+chmod 777 "$TEST_ROOT/restore" "$TEST_ROOT/restore/s3" "$TEST_ROOT/restore/sftp"
 printf 'hello from integration test' > "$TEST_ROOT/source/hello.txt"
 dd if=/dev/urandom of="$TEST_ROOT/source/nested/payload.bin" bs=1024 count=1024 status=none
 
