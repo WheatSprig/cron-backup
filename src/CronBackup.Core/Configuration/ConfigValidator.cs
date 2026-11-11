@@ -262,6 +262,13 @@ public sealed partial class ConfigValidator
                     result.Errors.Add(new ValidationIssue($"{path}.port", "port must be between 1 and 65535"));
                 }
 
+                if (string.IsNullOrWhiteSpace(destination.KnownHostsFile))
+                {
+                    result.Warnings.Add(new ValidationIssue(
+                        path,
+                        "sftp has no known_hosts_file; rclone will not validate the host key"));
+                }
+
                 break;
 
             case "local":

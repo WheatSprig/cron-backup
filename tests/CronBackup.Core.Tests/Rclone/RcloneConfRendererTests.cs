@@ -37,6 +37,20 @@ public sealed class RcloneConfRendererTests
     }
 
     [Fact]
+    public async Task RenderAsync_ShouldRenderSftpKnownHostsFile()
+    {
+        var config = CreateConfig();
+        config.Jobs[0].Destinations[1].KnownHostsFile = "/config/known_hosts";
+
+        var result = await new RcloneConfRenderer().RenderAsync(
+            config,
+            new FakeSecretObscurer(),
+            CancellationToken.None);
+
+        Assert.Contains("known_hosts_file = /config/known_hosts", result.Content);
+    }
+
+    [Fact]
     public async Task RenderAsync_ShouldObscureKnownRcloneOptions()
     {
         var config = new RootConfig

@@ -102,6 +102,9 @@ public sealed class RcloneConfRenderer
         }
 
         Append(content, "key_file", destination.KeyFile);
+        // 不配置 known_hosts_file 时 rclone 默认不校验主机密钥，只打一条 NOTICE。
+        // 生产环境建议指向只读挂载的 known_hosts；测试环境可用 "none" 显式静音。
+        Append(content, "known_hosts_file", destination.KnownHostsFile);
     }
 
     private static async Task RenderRcloneAsync(

@@ -97,6 +97,8 @@ public sealed class DestinationConfig
 
     public string? KeyFile { get; set; }
 
+    public string? KnownHostsFile { get; set; }
+
     public string? Path { get; set; }
 
     public string? Type { get; set; }

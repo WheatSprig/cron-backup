@@ -45,6 +45,8 @@ jobs:
         port: 22
         user: backup
         password: ${SFTP_PASSWORD}
+        # 建议挂载 known_hosts 并启用主机密钥校验；测试环境才用 "none"
+        # known_hosts_file: /config/known_hosts
         root: /volume1/backup/photos
 
     hooks:
