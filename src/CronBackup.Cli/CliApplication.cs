@@ -345,9 +345,21 @@ public static class CliApplication
             {
                 try
                 {
+                    var maxSizeMb = long.TryParse(
+                        Environment.GetEnvironmentVariable("LOG_MAX_SIZE_MB"),
+                        out var parsedSize)
+                        ? parsedSize
+                        : 50;
+                    var maxFiles = int.TryParse(
+                        Environment.GetEnvironmentVariable("LOG_MAX_FILES"),
+                        out var parsedFiles)
+                        ? parsedFiles
+                        : 3;
                     builder.AddProvider(new FileLoggerProvider(
                         Environment.GetEnvironmentVariable("LOG_FILE") ?? "/var/log/cron-backup/backup.log",
-                        logLevel));
+                        logLevel,
+                        maxSizeMb * 1024 * 1024,
+                        maxFiles));
                     return;
                 }
                 catch (IOException)

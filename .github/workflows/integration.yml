@@ -11,7 +11,10 @@ on:
     branches:
       - main
       - "feature/**"
+      - "feat/**"
       - "fix/**"
+      - "build/**"
+      - "ci/**"
     paths:
       - "src/**"
       - "tests/integration/**"

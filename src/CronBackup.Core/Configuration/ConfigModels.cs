@@ -20,6 +20,8 @@ public sealed class DefaultsConfig
 
     public bool? DryRun { get; set; }
 
+    public int? MaxParallel { get; set; }
+
     public RetentionPolicy? Retention { get; set; }
 
     public ArchiveOptions? Archive { get; set; }
@@ -137,6 +139,8 @@ public sealed class ArchiveOptions
     public string? Format { get; set; }
 
     public string? TempDir { get; set; }
+
+    public int? TimeoutSeconds { get; set; }
 }
 
 public sealed class HooksConfig

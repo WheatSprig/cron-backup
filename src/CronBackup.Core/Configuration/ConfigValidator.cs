@@ -85,6 +85,11 @@ public sealed partial class ConfigValidator
                 "expected 'console' or 'file'"));
         }
 
+        if (defaults.MaxParallel is <= 0)
+        {
+            result.Errors.Add(new ValidationIssue("defaults.max_parallel", "must be a positive integer"));
+        }
+
         ValidateRetention(defaults.Retention, "defaults.retention", result);
         ValidateArchive(defaults.Archive, "defaults.archive", result);
 
@@ -366,6 +371,11 @@ public sealed partial class ConfigValidator
         if (archive.TempDir is not null && string.IsNullOrWhiteSpace(archive.TempDir))
         {
             result.Errors.Add(new ValidationIssue($"{path}.temp_dir", "temp_dir cannot be empty"));
+        }
+
+        if (archive.TimeoutSeconds is <= 0)
+        {
+            result.Errors.Add(new ValidationIssue($"{path}.timeout_seconds", "must be a positive integer"));
         }
     }
 

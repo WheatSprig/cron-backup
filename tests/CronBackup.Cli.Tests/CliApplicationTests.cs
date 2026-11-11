@@ -272,6 +272,16 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public void Parse_ShouldSupportEqualsSyntax()
+    {
+        var options = CliOptions.Parse(["plan", "--config=config.yaml", "--job=photos", "--tier=weekly"]);
+
+        Assert.Equal("config.yaml", options.ConfigPath);
+        Assert.Equal("photos", options.Job);
+        Assert.Equal("weekly", options.Tier);
+    }
+
+    [Fact]
     public void Parse_ShouldRejectUnknownOption()
     {
         Assert.Throws<CliUsageException>(() => CliOptions.Parse(["validate", "--wat"]));

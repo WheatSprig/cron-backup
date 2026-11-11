@@ -109,6 +109,7 @@ public sealed class JobRunner
         var tempDirectory = string.IsNullOrWhiteSpace(archiveOptions?.TempDir)
             ? Path.GetTempPath()
             : archiveOptions!.TempDir!;
+        var archiveTimeout = TimeSpan.FromSeconds(archiveOptions?.TimeoutSeconds ?? 21600);
 
         var failures = new List<string>();
         var destinationResults = new List<DestinationRunResult>();
@@ -140,7 +141,7 @@ public sealed class JobRunner
             if (failures.Count == 0)
             {
                 archive = await _archiveService.CreateAsync(
-                    new ArchiveRequest(job.Name, job.Source.Path, tempDirectory, localNow),
+                    new ArchiveRequest(job.Name, job.Source.Path, tempDirectory, localNow, archiveTimeout),
                     cancellationToken);
                 archiveName = archive.FileName;
                 postContext = postContext with { ArchivePath = archive.ArchivePath };

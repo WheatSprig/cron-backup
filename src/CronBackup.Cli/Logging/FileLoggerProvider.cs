@@ -8,24 +8,23 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private readonly object _gate = new();
     private readonly string _path;
     private readonly LogLevel _minimumLevel;
-    private readonly StreamWriter _writer;
+    private readonly long _maxBytes;
+    private readonly int _maxFiles;
+    private StreamWriter _writer;
+    private long _currentBytes;
 
-    public FileLoggerProvider(string path, LogLevel minimumLevel)
+    public FileLoggerProvider(
+        string path,
+        LogLevel minimumLevel,
+        long maxBytes = 50 * 1024 * 1024,
+        int maxFiles = 3)
     {
         _path = path;
         _minimumLevel = minimumLevel;
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        _writer = new StreamWriter(
-            new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
-        {
-            AutoFlush = true,
-        };
+        _maxBytes = Math.Max(1, maxBytes);
+        _maxFiles = Math.Max(1, maxFiles);
+        _writer = OpenWriter();
+        _currentBytes = File.Exists(_path) ? new FileInfo(_path).Length : 0;
     }
 
     public ILogger CreateLogger(string categoryName) =>
@@ -43,7 +42,70 @@ public sealed class FileLoggerProvider : ILoggerProvider
     {
         lock (_gate)
         {
+            RotateIfNeeded();
             _writer.WriteLine(line);
+            _currentBytes += Encoding.UTF8.GetByteCount(line) +
+                             Encoding.UTF8.GetByteCount(_writer.NewLine);
+        }
+    }
+
+    private StreamWriter OpenWriter()
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(_path));
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        return new StreamWriter(
+            new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
+        {
+            AutoFlush = true,
+        };
+    }
+
+    private void RotateIfNeeded()
+    {
+        if (_currentBytes < _maxBytes)
+        {
+            return;
+        }
+
+        try
+        {
+            _writer.Dispose();
+
+            if (_maxFiles == 1)
+            {
+                File.Delete(_path);
+            }
+            else
+            {
+                for (var index = _maxFiles - 1; index >= 1; index--)
+                {
+                    var source = index == 1 ? _path : $"{_path}.{index - 1}";
+                    var target = $"{_path}.{index}";
+                    if (File.Exists(source))
+                    {
+                        File.Move(source, target, overwrite: true);
+                    }
+                }
+            }
+
+            _writer = OpenWriter();
+            _currentBytes = 0;
+        }
+        catch (IOException)
+        {
+            // 轮转失败时继续追加，至少不丢当前日志。
+            _writer = OpenWriter();
+            _currentBytes = File.Exists(_path) ? new FileInfo(_path).Length : 0;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _writer = OpenWriter();
+            _currentBytes = File.Exists(_path) ? new FileInfo(_path).Length : 0;
         }
     }
 

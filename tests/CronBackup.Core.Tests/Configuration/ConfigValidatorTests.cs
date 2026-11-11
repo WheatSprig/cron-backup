@@ -153,6 +153,28 @@ public sealed class ConfigValidatorTests
         Assert.True(result.IsValid);
     }
 
+    [Fact]
+    public void Validate_ShouldRejectNonPositiveMaxParallel()
+    {
+        var config = CreateValidConfig();
+        config.Defaults.MaxParallel = 0;
+
+        var result = new ConfigValidator().Validate(config);
+
+        Assert.Contains(result.Errors, issue => issue.Path == "defaults.max_parallel");
+    }
+
+    [Fact]
+    public void Validate_ShouldRejectNonPositiveArchiveTimeout()
+    {
+        var config = CreateValidConfig();
+        config.Jobs[0].Archive = new ArchiveOptions { TimeoutSeconds = 0 };
+
+        var result = new ConfigValidator().Validate(config);
+
+        Assert.Contains(result.Errors, issue => issue.Path.EndsWith(".timeout_seconds", StringComparison.Ordinal));
+    }
+
     private static RootConfig CreateValidConfig() => new()
     {
         Version = 1,
