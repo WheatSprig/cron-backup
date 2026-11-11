@@ -1,41 +1,84 @@
-FROM debian:12-slim
+# syntax=docker/dockerfile:1
 
-ENV DEBIAN_FRONTEND=noninteractive
+ARG RCLONE_VERSION=1.76.0
 
-# 安装所需组件并安装 rclone
-RUN apt-get update && \
-    apt install -y --no-install-recommends curl ca-certificates gnupg cron unzip && \
-    curl -fsSL https://rclone.org/install.sh | bash - && \
-    apt-get purge -y curl unzip && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
+ARG TARGETARCH
+ARG TARGETVARIANT
+WORKDIR /src
 
-WORKDIR /backup
+COPY Directory.Build.props global.json CronBackup.sln ./
+COPY src/CronBackup.Core/CronBackup.Core.csproj src/CronBackup.Core/
+COPY src/CronBackup.Cli/CronBackup.Cli.csproj src/CronBackup.Cli/
+RUN dotnet restore src/CronBackup.Cli/CronBackup.Cli.csproj
 
-# RClone 配置文件路径
-ENV RCLONE_CONFIG=/config/rclone.conf
+COPY src ./src
+RUN case "${TARGETARCH}/${TARGETVARIANT}" in \
+        amd64/) RID=linux-x64 ;; \
+        arm64/) RID=linux-arm64 ;; \
+        arm/v7) RID=linux-arm ;; \
+        *) echo "unsupported platform: ${TARGETARCH}/${TARGETVARIANT}" >&2; exit 1 ;; \
+    esac && \
+    dotnet publish src/CronBackup.Cli/CronBackup.Cli.csproj \
+        -c Release \
+        -r "$RID" \
+        --self-contained true \
+        -p:PublishSingleFile=true \
+        -p:IncludeNativeLibrariesForSelfExtract=true \
+        -p:PublishTrimmed=false \
+        -p:InvariantGlobalization=false \
+        -o /app/publish
 
-# 创建默认用户
+FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-bookworm-slim AS runtime
+ARG TARGETARCH
+ARG TARGETVARIANT
+ARG RCLONE_VERSION
 ARG UID=1000
 ARG GID=1000
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    CRONBACKUP_STATUS_FILE=/tmp/cron-backup/status.json \
+    LOG_FILE=/var/log/cron-backup/backup.log
+
 RUN apt-get update && \
-    echo "Etc/UTC" > /etc/localtime && \
-    apt-get -y --no-install-recommends install whois wget && \
-    addgroup --gid $GID maisui && \
-    useradd -m -u $UID -g $GID -d /backup maisui && \
-    echo "maisui:$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 24 | mkpasswd -s -m sha-256)" | chpasswd && \
+    apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        gzip \
+        libicu72 \
+        passwd \
+        tar \
+        tzdata \
+        unzip && \
+    case "${TARGETARCH}/${TARGETVARIANT}" in \
+        amd64/) RCLONE_ARCH=amd64 ;; \
+        arm64/) RCLONE_ARCH=arm64 ;; \
+        arm/v7) RCLONE_ARCH=arm-v7 ;; \
+        *) echo "unsupported platform: ${TARGETARCH}/${TARGETVARIANT}" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL \
+        "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-${RCLONE_ARCH}.zip" \
+        -o /tmp/rclone.zip && \
+    unzip -q /tmp/rclone.zip -d /tmp && \
+    install -m 0755 "/tmp/rclone-v${RCLONE_VERSION}-linux-${RCLONE_ARCH}/rclone" /usr/local/bin/rclone && \
+    rm -rf /tmp/rclone.zip "/tmp/rclone-v${RCLONE_VERSION}-linux-${RCLONE_ARCH}" && \
+    apt-get purge -y curl unzip && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid "$GID" cronbackup && \
+    useradd --uid "$UID" --gid "$GID" --create-home --home-dir /backup --shell /bin/bash cronbackup && \
+    install -d -o cronbackup -g cronbackup /backup /config /var/log /var/log/cron-backup
 
-COPY --chown=maisui:maisui entrypoint.sh /
-COPY --chown=maisui:maisui generate-config.sh /backup/
-COPY --chown=maisui:maisui backup.sh /backup/
+COPY --from=build /app/publish /app
 
-RUN chmod +x /entrypoint.sh /backup/generate-config.sh /backup/backup.sh
+WORKDIR /backup
+USER cronbackup
 
-USER maisui
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["/app/cron-backup", "health"]
 
-HEALTHCHECK CMD [ ! -f /tmp/last_backup_failed ]
-
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/cron-backup"]
+CMD ["run"]

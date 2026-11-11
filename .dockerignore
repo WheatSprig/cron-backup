@@ -1,0 +1,13 @@
+.git
+.github
+.agents
+.idea
+.vs
+**/bin
+**/obj
+**/TestResults
+data
+config
+logs
+*.user
+*.log
