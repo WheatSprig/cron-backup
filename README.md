@@ -318,6 +318,9 @@ cron-backup list --remote --config /config/config.yaml
 # 预演清理
 cron-backup prune --config /config/config.yaml
 
+# 预演一次完整备份：打包、hook、上传都不会发生，只列远端并输出计划
+cron-backup run --once --dry-run --config /config/config.yaml
+
 # 实际清理
 cron-backup prune --config /config/config.yaml --apply
 

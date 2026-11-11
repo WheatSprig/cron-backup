@@ -146,6 +146,7 @@ bool SupportsServerSideCopy { get; }
 - 单轮删除受 `max_delete` 限制，超出部分保留到下次；执行结果要带 `PendingDeletes`。
 - 删除前再次校验所有 key 都在目标 tier 前缀下；空前缀、root 解析失败一律拒绝。
 - 删除必须支持 `DRY_RUN` / `--dry-run`；手动 `prune` 默认 dry-run，`--apply` 才真删。
+- `run --dry-run` 也要走 `BuildPlanAsync` 输出预览，但不打包、不执行 hook、不写远端。
 
 ### 5.2 归档
 
