@@ -901,16 +901,6 @@ public static class CliApplication
             _ => LogLevel.Information,
         };
 
-    private static async Task<int> NotImplementedAsync(
-        string command,
-        TextWriter output,
-        TextWriter error)
-    {
-        await error.WriteLineAsync($"error: '{command}' is not implemented in this skeleton build");
-        await output.WriteLineAsync("implemented commands: help, version, validate, plan, list");
-        return 3;
-    }
-
     private static async Task<int> UnknownCommandAsync(string command, TextWriter error)
     {
         await error.WriteLineAsync($"error: unknown command '{command}'");
@@ -1041,21 +1031,32 @@ public static class CliApplication
         await writer.WriteLineAsync("cron-backup <command> [options]");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("commands:");
-        await writer.WriteLineAsync("  run       run jobs (not implemented in this build)");
+        await writer.WriteLineAsync("  run       run jobs once and exit, or start the built-in scheduler");
         await writer.WriteLineAsync("  plan      show the effective configuration and planned actions");
         await writer.WriteLineAsync("  validate  validate configuration and environment placeholders");
-        await writer.WriteLineAsync("  list      list jobs and destinations");
-        await writer.WriteLineAsync("  prune     apply retention (not implemented in this build)");
-        await writer.WriteLineAsync("  restore   restore an archive (not implemented in this build)");
-        await writer.WriteLineAsync("  health    check daemon status (not implemented in this build)");
+        await writer.WriteLineAsync("  list      list jobs; add --remote to list remote objects");
+        await writer.WriteLineAsync("  prune     apply retention; dry-run unless --apply is set");
+        await writer.WriteLineAsync("  restore   download or extract an archive");
+        await writer.WriteLineAsync("  health    check daemon status");
         await writer.WriteLineAsync("  version   print version information");
         await writer.WriteLineAsync();
         await writer.WriteLineAsync("options:");
-        await writer.WriteLineAsync("  --config PATH   configuration file");
-        await writer.WriteLineAsync("  --job NAME      select one job");
-        await writer.WriteLineAsync("  --json          machine-readable output");
-        await writer.WriteLineAsync("  --dry-run       force dry-run mode");
-        await writer.WriteLineAsync("  --online        perform remote checks (not implemented)");
-        await writer.WriteLineAsync("  -h, --help      show this help");
+        await writer.WriteLineAsync("  --config PATH        configuration file");
+        await writer.WriteLineAsync("  --job NAME           select one job");
+        await writer.WriteLineAsync("  --json               machine-readable output");
+        await writer.WriteLineAsync("  --dry-run            force dry-run mode");
+        await writer.WriteLineAsync("  --once               run once instead of starting the scheduler");
+        await writer.WriteLineAsync("  --remote             list remote objects (list)");
+        await writer.WriteLineAsync("  --tier TIER          daily|weekly|monthly (list/restore)");
+        await writer.WriteLineAsync("  --destination NAME   destination (restore)");
+        await writer.WriteLineAsync("  --key KEY            archive key (restore)");
+        await writer.WriteLineAsync("  --latest             newest archive (restore)");
+        await writer.WriteLineAsync("  --to DIR             restore destination directory");
+        await writer.WriteLineAsync("  --extract            extract restored archive");
+        await writer.WriteLineAsync("  --apply              actually delete (prune)");
+        await writer.WriteLineAsync("  --strict             strict health check");
+        await writer.WriteLineAsync("  --online             remote checks (not implemented)");
+        await writer.WriteLineAsync("  --log-level LEVEL    trace|debug|info|warning|error");
+        await writer.WriteLineAsync("  -h, --help           show this help");
     }
 }
