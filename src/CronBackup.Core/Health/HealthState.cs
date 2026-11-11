@@ -1,8 +1,17 @@
+using System.Reflection;
+
 namespace CronBackup.Core.Health;
 
 public sealed class HealthState
 {
-    public string Version { get; set; } = "2.0.0-alpha.1";
+    private static readonly string DefaultVersion =
+        typeof(HealthState).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+        ?? typeof(HealthState).Assembly.GetName().Version?.ToString()
+        ?? "unknown";
+
+    public string Version { get; set; } = DefaultVersion;
 
     public string Mode { get; set; } = "daemon";
 

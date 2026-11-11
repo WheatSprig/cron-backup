@@ -45,6 +45,8 @@ public static class CliApplication
             return 0;
         }
 
+        TempWorkspace.CleanupStale(TimeSpan.FromHours(24));
+
         try
         {
             return options.Command switch
@@ -373,7 +375,7 @@ public static class CliApplication
         var runner = new JobRunner(
             new TarArchiveService(processRunner),
             storageFactory,
-            new FileJobLockFactory(),
+            CreateLockFactory(),
             new HookRunner(processRunner, loggerFactory.CreateLogger<HookRunner>()),
             new HttpNotifier(httpClient),
             loggerFactory.CreateLogger<JobRunner>(),
@@ -547,11 +549,21 @@ public static class CliApplication
         var apply = options.Apply && !options.DryRun && loaded.Config.Defaults.DryRun != true;
         var now = DateTimeOffset.UtcNow;
         var factory = CreateStorageFactory();
+        var lockFactory = CreateLockFactory();
         var results = new List<object>();
         var failures = new List<string>();
 
         foreach (var job in jobs)
         {
+            // prune 是破坏性操作，必须和 run 共用同一把 job 锁。
+            // 跨容器执行时要把 CRONBACKUP_LOCK_DIR 指到共享可写卷，否则锁不互通。
+            await using var jobLock = await lockFactory.TryAcquireAsync(job.Name, cancellationToken);
+            if (!jobLock.Acquired)
+            {
+                failures.Add($"{job.Name}: job is already running");
+                continue;
+            }
+
             var timezone = ResolveTimezone(job.Timezone ?? loaded.Config.Defaults.Timezone ?? "UTC");
             foreach (var destination in job.Destinations)
             {
@@ -824,6 +836,12 @@ public static class CliApplication
             new RcloneConfRenderer(),
             new RcloneProcessSecretObscurer(),
             processRunner);
+    }
+
+    private static FileJobLockFactory CreateLockFactory()
+    {
+        var directory = Environment.GetEnvironmentVariable("CRONBACKUP_LOCK_DIR");
+        return new FileJobLockFactory(string.IsNullOrWhiteSpace(directory) ? null : directory);
     }
 
     private static string NormalizeTier(string? tier)

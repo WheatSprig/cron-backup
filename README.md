@@ -167,6 +167,10 @@ env 只负责凭据和全局默认：
   no_check_bucket: true
 ```
 
+SFTP 的 `root` 建议使用相对于登录目录的路径（例如 `backup/photos`）；如果服务器把用户
+chroot 到 home，绝对路径可能被解释到错误位置。生产环境应配置 `known_hosts_file`，
+测试环境才用 `known_hosts_file: none` 关闭主机密钥校验。
+
 `kind: rclone` 是逃生口，用于程序没有专门建模的 rclone 后端：
 
 ```yaml
@@ -296,6 +300,9 @@ cron-backup prune --config /config/config.yaml
 
 # 实际清理
 cron-backup prune --config /config/config.yaml --apply
+
+# prune 会先拿 job 锁；如果 run 和 prune 不在同一个容器，
+# 需要把 CRONBACKUP_LOCK_DIR 指到共享可写卷，例如 /backup/.cron-backup-locks
 
 # 恢复最新 daily 归档并解压
 cron-backup restore --job photos --latest --to /restore --extract
