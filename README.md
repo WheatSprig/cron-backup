@@ -371,7 +371,7 @@ HEALTHCHECK CMD ["/app/cron-backup", "health"]
 - 运行时包含 rclone、GNU tar、bash、tzdata、ICU
 - 没有 crond
 - 支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`
-- 稳定版同时发布 `v2.1.1`、`2.1.1`、`2.1`、`2`、`latest`
+- 稳定版同时发布 `v2.1.2`、`2.1.2`、`2.1`、`2`、`latest`
 
 ```bash
 docker buildx build \
