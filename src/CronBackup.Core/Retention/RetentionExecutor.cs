@@ -2,17 +2,16 @@ using CronBackup.Core.Storage;
 
 namespace CronBackup.Core.Retention;
 
-public sealed class RetentionAbortedException : Exception
-{
-    public RetentionAbortedException(string message)
-        : base(message)
-    {
-    }
-}
+public sealed record RetentionApplyResult(
+    IReadOnlyList<string> Deleted,
+    int Pending,
+    bool Truncated);
 
-public static class RetentionService
+/// <summary>run 和 prune 共用的清理执行器，避免两份删除逻辑漂移。</summary>
+public static class RetentionExecutor
 {
-    public static async Task<RetentionPlan> PlanAsync(
+    /// <summary>读取三档对象并生成保留计划；prune 与 run 都走这里。</summary>
+    public static async Task<RetentionPlan> BuildPlanAsync(
         IStorageBackend backend,
         ResolvedRetention policy,
         DateTimeOffset now,
@@ -34,20 +33,11 @@ public static class RetentionService
             currentKey);
     }
 
-    // 调用方应先把 plan 展示给用户；这里只执行已经算好的 ToDelete。
-    // 任一 tier 超限都拒绝整批删除，避免“删一半”造成不可控状态。
-    public static async Task<IReadOnlyList<string>> ApplyAsync(
+    public static async Task<RetentionApplyResult> ApplyAsync(
         IStorageBackend backend,
         RetentionPlan plan,
         CancellationToken cancellationToken)
     {
-        var aborted = plan.Prune.FirstOrDefault(item => item.Aborted);
-        if (aborted is not null)
-        {
-            throw new RetentionAbortedException(
-                $"retention candidates for {aborted.Tier} exceed max_delete {aborted.MaxDelete}");
-        }
-
         var keys = plan.Prune
             .SelectMany(item => item.ToDelete)
             .Select(item => item.Key)
@@ -59,6 +49,7 @@ public static class RetentionService
             await backend.DeleteManyAsync(keys, cancellationToken);
         }
 
-        return keys;
+        var pending = plan.PendingDeletes;
+        return new RetentionApplyResult(keys, pending, pending > 0);
     }
 }

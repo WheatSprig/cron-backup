@@ -190,6 +190,72 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task Prune_ShouldDeleteInBatchesWhenCandidatesExceedMaxDelete()
+    {
+        using var temp = new TestTempDirectory();
+        var source = Path.Combine(temp.Path, "source");
+        var destination = Path.Combine(temp.Path, "remote");
+        var daily = Path.Combine(destination, "daily");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(daily);
+
+        var start = new DateTime(2026, 10, 1);
+        for (var index = 0; index < 10; index++)
+        {
+            var name = $"backup_{start.AddDays(index):yyyyMMdd}_020000_000.tar.gz";
+            await File.WriteAllTextAsync(Path.Combine(daily, name), "x");
+        }
+
+        var jobName = $"truncate-{Guid.NewGuid():N}";
+        var config = $"""
+            version: 1
+            defaults:
+              timezone: UTC
+              retention:
+                daily: 3
+                max_delete: 4
+            jobs:
+              - name: {jobName}
+                source:
+                  path: "{source.Replace('\\', '/')}"
+                destinations:
+                  - name: local
+                    kind: local
+                    path: "{destination.Replace('\\', '/')}"
+            """;
+        var path = temp.WriteFile("config.yaml", config);
+
+        var firstOutput = new StringWriter();
+        var firstExit = await CliApplication.RunAsync(
+            ["prune", "--config", path, "--apply"],
+            firstOutput,
+            new StringWriter(),
+            CancellationToken.None);
+
+        Assert.Equal(0, firstExit);
+        Assert.Contains("deleted=4", firstOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("pending=3", firstOutput.ToString(), StringComparison.Ordinal);
+        Assert.Equal(6, Directory.GetFiles(daily, "*.tar.gz").Length);
+
+        var secondOutput = new StringWriter();
+        var secondExit = await CliApplication.RunAsync(
+            ["prune", "--config", path, "--apply"],
+            secondOutput,
+            new StringWriter(),
+            CancellationToken.None);
+
+        Assert.Equal(0, secondExit);
+        Assert.Contains("deleted=3", secondOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("pending=0", secondOutput.ToString(), StringComparison.Ordinal);
+        Assert.Equal(
+            new[] { "20261008", "20261009", "20261010" },
+            Directory.GetFiles(daily, "*.tar.gz")
+                .Select(Path.GetFileName)
+                .Select(name => name!.Substring("backup_".Length, 8))
+                .OrderBy(value => value));
+    }
+
+    [Fact]
     public async Task Restore_ShouldDownloadAndExtractLatestArchive()
     {
         using var temp = new TestTempDirectory();

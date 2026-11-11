@@ -490,6 +490,7 @@ public static class CliApplication
                     status = result.Status.ToString().ToLowerInvariant(),
                     archive = result.ArchiveName,
                     error = result.Error,
+                    pendingDeletes = result.PendingDeletes,
                     destinations = result.Destinations.Select(destination => new
                     {
                         name = destination.Name,
@@ -497,6 +498,7 @@ public static class CliApplication
                         uploaded = destination.Uploaded,
                         promoted = destination.Promoted,
                         deleted = destination.Deleted,
+                        pendingDeletes = destination.PendingDeletes,
                         error = destination.Error,
                     }),
                 }),
@@ -517,6 +519,12 @@ public static class CliApplication
                 await output.WriteLineAsync(
                     $"  {destination.Name}: {(destination.Success ? "ok" : "failed")} " +
                     $"uploaded={destination.Uploaded.Count} promoted={destination.Promoted.Count} deleted={destination.Deleted.Count}");
+                if (destination.PendingDeletes > 0)
+                {
+                    await output.WriteLineAsync(
+                        $"    retention: {destination.PendingDeletes} more object(s) deferred by max_delete, will retry next run");
+                }
+
                 if (destination.Error is not null)
                 {
                     await output.WriteLineAsync($"    error: {destination.Error}");
@@ -531,7 +539,7 @@ public static class CliApplication
     }
 
     // 手动 prune 默认 dry-run；只有 --apply 且没有 DRY_RUN 时才真正删除。
-    // max_delete 超限时整批中止并返回非零，不做部分删除。
+    // max_delete 超限时本轮只删上限数量，剩余在输出里报告，下次继续。
     private static async Task<int> PruneCommandAsync(
         CliOptions options,
         TextWriter output,
@@ -589,7 +597,7 @@ public static class CliApplication
                 }
 
                 await using var backend = await factory.CreateAsync(job, destination, cancellationToken);
-                var plan = await RetentionService.PlanAsync(
+                var plan = await RetentionExecutor.BuildPlanAsync(
                     backend,
                     policy,
                     now,
@@ -597,18 +605,14 @@ public static class CliApplication
                     currentKey: null,
                     cancellationToken);
 
-                var aborted = plan.Prune.Where(item => item.Aborted).ToList();
-                if (aborted.Count > 0)
-                {
-                    failures.Add(
-                        $"{job.Name}/{destination.Name}: retention candidates exceed max_delete " +
-                        $"({string.Join(", ", aborted.Select(item => $"{item.Tier}={item.Candidates.Count}/{item.MaxDelete}"))})");
-                }
-
+                // 候选超过 max_delete 时只删前 max_delete 个，剩余留给下次运行。
                 IReadOnlyList<string> deleted = Array.Empty<string>();
-                if (apply && aborted.Count == 0)
+                var pending = plan.PendingDeletes;
+                if (apply)
                 {
-                    deleted = await RetentionService.ApplyAsync(backend, plan, cancellationToken);
+                    var applied = await RetentionExecutor.ApplyAsync(backend, plan, cancellationToken);
+                    deleted = applied.Deleted;
+                    pending = applied.Pending;
                 }
 
                 var candidates = plan.Prune
@@ -621,9 +625,10 @@ public static class CliApplication
                     job = job.Name,
                     destination = destination.Name,
                     apply,
-                    aborted = aborted.Count > 0,
+                    truncated = pending > 0,
                     candidates,
                     deleted,
+                    pendingDeletes = pending,
                 });
 
                 if (options.Json)
@@ -633,7 +638,7 @@ public static class CliApplication
 
                 await output.WriteLineAsync(
                     $"{job.Name}/{destination.Name}: candidates={candidates.Count} " +
-                    $"deleted={deleted.Count} mode={(apply ? "apply" : "dry-run")}");
+                    $"deleted={deleted.Count} pending={pending} mode={(apply ? "apply" : "dry-run")}");
                 foreach (var key in candidates)
                 {
                     await output.WriteLineAsync($"  - {key}");

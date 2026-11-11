@@ -23,14 +23,16 @@ public sealed record DestinationRunResult(
     IReadOnlyList<string> Uploaded,
     IReadOnlyList<string> Promoted,
     IReadOnlyList<string> Deleted,
-    string? Error);
+    string? Error,
+    int PendingDeletes = 0);
 
 public sealed record JobRunResult(
     string JobName,
     JobRunStatus Status,
     string? ArchiveName,
     IReadOnlyList<DestinationRunResult> Destinations,
-    string? Error)
+    string? Error,
+    int PendingDeletes = 0)
 {
     public bool Succeeded => Status == JobRunStatus.Success;
 }
@@ -220,7 +222,8 @@ public sealed class JobRunner
             success ? JobRunStatus.Success : JobRunStatus.Failed,
             archiveName,
             destinationResults,
-            error);
+            error,
+            destinationResults.Sum(result => result.PendingDeletes));
     }
 
     private async Task UpdateHealthAsync(
@@ -269,6 +272,7 @@ public sealed class JobRunner
         var uploaded = new List<string>();
         var promoted = new List<string>();
         var deleted = new List<string>();
+        var pendingDeletes = 0;
 
         try
         {
@@ -290,19 +294,18 @@ public sealed class JobRunner
             // retention 关闭时只上传，不 list、不提升、不删除。
             if (policy.Enabled)
             {
-                var daily = await backend.ListAsync("daily", cancellationToken);
+                // 提升判定与清理分开：提升只关心 weekly/monthly 最近有没有对象，
+                // 不必为了算提升把 daily 全量列一遍。
                 var weekly = await backend.ListAsync("weekly", cancellationToken);
                 var monthly = await backend.ListAsync("monthly", cancellationToken);
-                var promotion = RetentionPlanner.BuildPlan(
+                var promotion = RetentionPlanner.BuildPromotion(
                     policy,
-                    daily,
                     weekly,
                     monthly,
                     now,
-                    timezone,
-                    key);
+                    timezone);
 
-                if (promotion.Promotion.Weekly)
+                if (promotion.Weekly)
                 {
                     var promotedKey = await PromoteAsync(
                         backend,
@@ -315,7 +318,7 @@ public sealed class JobRunner
                     }
                 }
 
-                if (promotion.Promotion.Monthly)
+                if (promotion.Monthly)
                 {
                     var promotedKey = await PromoteAsync(
                         backend,
@@ -328,41 +331,32 @@ public sealed class JobRunner
                     }
                 }
 
-                daily = await backend.ListAsync("daily", cancellationToken);
-                weekly = await backend.ListAsync("weekly", cancellationToken);
-                monthly = await backend.ListAsync("monthly", cancellationToken);
-                var prune = RetentionPlanner.BuildPlan(
+                // 清理与 prune 命令共用执行器：候选超过 max_delete 时截断，
+                // 本次删一部分，剩余数量回传给调用方并在下次运行继续。
+                var prune = await RetentionExecutor.BuildPlanAsync(
+                    backend,
                     policy,
-                    daily,
-                    weekly,
-                    monthly,
                     now,
                     timezone,
-                    key);
+                    key,
+                    cancellationToken);
 
-                if (prune.Prune.Any(plan => plan.Aborted))
+                var applied = await _retryPolicy.ExecuteAsync(
+                    token => RetentionExecutor.ApplyAsync(backend, prune, token),
+                    ShouldRetry,
+                    cancellationToken);
+
+                deleted.AddRange(applied.Deleted);
+                pendingDeletes = applied.Pending;
+
+                if (applied.Truncated)
                 {
                     _logger.LogWarning(
-                        "retention delete limit exceeded, skipping deletion: job={Job} destination={Destination}",
+                        "retention hit max_delete, {Deleted} deleted / {Pending} deferred: job={Job} destination={Destination}",
+                        applied.Deleted.Count,
+                        applied.Pending,
                         job.Name,
                         destination.Name);
-                }
-                else
-                {
-                    var toDelete = prune.Prune
-                        .SelectMany(plan => plan.ToDelete)
-                        .Select(item => item.Key)
-                        .Distinct(StringComparer.Ordinal)
-                        .ToList();
-
-                    if (toDelete.Count > 0)
-                    {
-                        await _retryPolicy.ExecuteAsync(
-                            token => backend.DeleteManyAsync(toDelete, token),
-                            ShouldRetry,
-                            cancellationToken);
-                        deleted.AddRange(toDelete);
-                    }
                 }
             }
 
@@ -372,7 +366,8 @@ public sealed class JobRunner
                 uploaded,
                 promoted,
                 deleted,
-                null);
+                null,
+                pendingDeletes);
         }
         catch (OperationCanceledException)
         {
@@ -391,7 +386,8 @@ public sealed class JobRunner
                 uploaded,
                 promoted,
                 deleted,
-                exception.Message);
+                exception.Message,
+                pendingDeletes);
         }
     }
 
