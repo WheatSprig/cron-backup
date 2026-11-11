@@ -61,6 +61,20 @@ public sealed class LocalBackendTests
     }
 
     [Fact]
+    public async Task GetHashAsync_ShouldReturnMd5()
+    {
+        using var temp = new TempDirectory();
+        var source = temp.File("source.txt");
+        await File.WriteAllTextAsync(source, "data");
+        var backend = new LocalBackend(Path.Combine(temp.Path, "remote"));
+        await backend.UploadAsync(source, "daily/backup.txt", CancellationToken.None);
+
+        var hash = await backend.GetHashAsync("daily/backup.txt", CancellationToken.None);
+
+        Assert.Equal("8d777f385d3dfec8815d20f7496026dc", hash);
+    }
+
+    [Fact]
     public async Task DownloadAsync_ShouldWriteFile()
     {
         using var temp = new TempDirectory();

@@ -79,6 +79,32 @@ public sealed class RcloneBackend : IStorageBackend
         return ParseObject(element, key);
     }
 
+    public async Task<string?> GetHashAsync(string key, CancellationToken cancellationToken)
+    {
+        var result = await RunAsync(
+            ["hashsum", "MD5", BuildPath(key)],
+            cancellationToken);
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            return null;
+        }
+
+        var firstLine = result.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+        if (firstLine is null)
+        {
+            return null;
+        }
+
+        var hash = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+        return hash.Equals("UNSUPPORTED", StringComparison.OrdinalIgnoreCase) ||
+               hash.Equals("ERROR", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : hash.ToLowerInvariant();
+    }
+
     public async Task UploadAsync(string localPath, string key, CancellationToken cancellationToken)
     {
         var result = await RunAsync(

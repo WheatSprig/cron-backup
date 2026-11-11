@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace CronBackup.Core.Storage;
 
 public sealed class LocalBackend : IStorageBackend
@@ -33,6 +35,25 @@ public sealed class LocalBackend : IStorageBackend
         }
 
         return Task.FromResult<RemoteObject?>(ToRemoteObject(info));
+    }
+
+    public async Task<string?> GetHashAsync(string key, CancellationToken cancellationToken)
+    {
+        var path = Resolve(key);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var hash = await MD5.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     public async Task UploadAsync(string localPath, string key, CancellationToken cancellationToken)

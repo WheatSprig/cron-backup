@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using CronBackup.Core.Configuration;
 using CronBackup.Core.Health;
 using CronBackup.Core.Retention;
@@ -270,7 +271,7 @@ public sealed class JobRunner
                 ShouldRetry,
                 cancellationToken);
             uploaded.Add(key);
-            await VerifyAsync(backend, key, archive.Size, job.Verify ?? "size", cancellationToken);
+            await VerifyAsync(backend, key, archive, job.Verify ?? "size", cancellationToken);
 
             var policy = RetentionResolver.Resolve(
                 config.Defaults.Retention,
@@ -387,7 +388,7 @@ public sealed class JobRunner
     private async Task VerifyAsync(
         IStorageBackend backend,
         string key,
-        long expectedSize,
+        ArchiveResult archive,
         string verifyMode,
         CancellationToken cancellationToken)
     {
@@ -396,22 +397,46 @@ public sealed class JobRunner
             return;
         }
 
-        if (string.Equals(verifyMode, "checksum", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new NotSupportedException("checksum verification is not available in this build yet");
-        }
-
         var stat = await backend.StatAsync(key, cancellationToken);
         if (stat is null)
         {
             throw new InvalidOperationException($"uploaded object not found after upload: {key}");
         }
 
-        if (stat.Size != expectedSize)
+        if (stat.Size != archive.Size)
         {
             throw new InvalidOperationException(
-                $"uploaded object size mismatch: {key} expected {expectedSize}, got {stat.Size}");
+                $"uploaded object size mismatch: {key} expected {archive.Size}, got {stat.Size}");
         }
+
+        if (string.Equals(verifyMode, "checksum", StringComparison.OrdinalIgnoreCase))
+        {
+            var remoteHash = await backend.GetHashAsync(key, cancellationToken);
+            if (remoteHash is null)
+            {
+                throw new NotSupportedException($"remote checksum is not available for {key}");
+            }
+
+            var localHash = await ComputeMd5Async(archive.ArchivePath, cancellationToken);
+            if (!string.Equals(remoteHash, localHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"uploaded object checksum mismatch: {key} expected {localHash}, got {remoteHash}");
+            }
+        }
+    }
+
+    private static async Task<string> ComputeMd5Async(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var hash = await MD5.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private async Task<string?> PromoteAsync(
@@ -459,7 +484,7 @@ public sealed class JobRunner
             }
         }
 
-        await VerifyAsync(backend, targetKey, archive.Size, "size", cancellationToken);
+        await VerifyAsync(backend, targetKey, archive, "size", cancellationToken);
         return targetKey;
     }
 

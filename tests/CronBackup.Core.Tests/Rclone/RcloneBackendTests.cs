@@ -54,6 +54,22 @@ public sealed class RcloneBackendTests
     }
 
     [Fact]
+    public async Task GetHashAsync_ShouldParseHashsum()
+    {
+        var runner = new StubProcessRunner(_ => new ProcessResult(
+            0,
+            "8d777f385d3dfec8815d20f7496026dc  daily/backup.tar.gz\n",
+            "",
+            false));
+        await using var backend = await CreateBackend(runner);
+
+        var hash = await backend.GetHashAsync("daily/backup.tar.gz", CancellationToken.None);
+
+        Assert.Equal("8d777f385d3dfec8815d20f7496026dc", hash);
+        Assert.Contains(runner.Specs, spec => spec.Arguments.Contains("hashsum"));
+    }
+
+    [Fact]
     public async Task UploadAsync_ShouldUseCopyToAndRenderedPath()
     {
         var runner = new StubProcessRunner(_ => new ProcessResult(0, "", "", false));

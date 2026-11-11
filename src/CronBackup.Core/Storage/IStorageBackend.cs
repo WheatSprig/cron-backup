@@ -8,6 +8,8 @@ public interface IStorageBackend : IAsyncDisposable
 
     Task<RemoteObject?> StatAsync(string key, CancellationToken cancellationToken);
 
+    Task<string?> GetHashAsync(string key, CancellationToken cancellationToken);
+
     Task UploadAsync(string localPath, string key, CancellationToken cancellationToken);
 
     Task CopyWithinAsync(string sourceKey, string destinationKey, CancellationToken cancellationToken);
