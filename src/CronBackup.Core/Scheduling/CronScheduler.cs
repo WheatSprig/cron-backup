@@ -52,8 +52,10 @@ public sealed class CronScheduler
 
         using var heartbeatSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var heartbeatTask = HeartbeatAsync(heartbeatSource.Token);
+        var maxParallel = Math.Max(1, config.Defaults.MaxParallel ?? 1);
+        using var slots = new SemaphoreSlim(maxParallel, maxParallel);
         var tasks = jobs
-            .Select(job => RunJobLoopAsync(job, config.Defaults.Timezone, runJob, cancellationToken))
+            .Select(job => RunJobLoopAsync(job, config.Defaults.Timezone, runJob, slots, cancellationToken))
             .ToArray();
 
         try
@@ -111,6 +113,7 @@ public sealed class CronScheduler
         JobConfig job,
         string? defaultTimezone,
         Func<JobConfig, CancellationToken, Task> runJob,
+        SemaphoreSlim slots,
         CancellationToken cancellationToken)
     {
         if (job.IntervalSeconds is { } intervalSeconds)
@@ -118,7 +121,7 @@ public sealed class CronScheduler
             var interval = TimeSpan.FromSeconds(intervalSeconds);
             while (!cancellationToken.IsCancellationRequested)
             {
-                await ExecuteSafelyAsync(job, runJob, cancellationToken);
+                await ExecuteSafelyAsync(job, runJob, slots, cancellationToken);
                 await DelayForAsync(interval, cancellationToken);
             }
 
@@ -127,14 +130,14 @@ public sealed class CronScheduler
 
         if (job.Schedule is null)
         {
-            await ExecuteSafelyAsync(job, runJob, cancellationToken);
+            await ExecuteSafelyAsync(job, runJob, slots, cancellationToken);
             return;
         }
 
         var expression = ParseSchedule(job.Schedule);
         var timezone = ResolveTimezone(job.Timezone ?? defaultTimezone ?? "UTC");
 
-        await ExecuteSafelyAsync(job, runJob, cancellationToken);
+        await ExecuteSafelyAsync(job, runJob, slots, cancellationToken);
         while (!cancellationToken.IsCancellationRequested)
         {
             var now = _timeProvider.GetUtcNow();
@@ -146,15 +149,17 @@ public sealed class CronScheduler
             }
 
             await DelayUntilAsync(next.Value, cancellationToken);
-            await ExecuteSafelyAsync(job, runJob, cancellationToken);
+            await ExecuteSafelyAsync(job, runJob, slots, cancellationToken);
         }
     }
 
     private async Task ExecuteSafelyAsync(
         JobConfig job,
         Func<JobConfig, CancellationToken, Task> runJob,
+        SemaphoreSlim slots,
         CancellationToken cancellationToken)
     {
+        await slots.WaitAsync(cancellationToken);
         try
         {
             await runJob(job, cancellationToken);
@@ -166,6 +171,10 @@ public sealed class CronScheduler
         catch (Exception exception)
         {
             _logger.LogError(exception, "scheduled job failed: job={Job}", job.Name);
+        }
+        finally
+        {
+            slots.Release();
         }
     }
 

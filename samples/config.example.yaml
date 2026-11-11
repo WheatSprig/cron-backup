@@ -4,6 +4,7 @@ defaults:
   timezone: Asia/Shanghai
   log_target: console
   dry_run: false
+  max_parallel: 1
   retention:
     daily: 7
     weekly: 4
@@ -12,6 +13,7 @@ defaults:
   archive:
     format: tar.gz
     temp_dir: /tmp
+    timeout_seconds: 21600
 
 jobs:
   - name: photos

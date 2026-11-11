@@ -4,7 +4,8 @@ public sealed record ArchiveRequest(
     string JobName,
     string SourcePath,
     string TempDirectory,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp,
+    TimeSpan? Timeout = null);
 
 public sealed class ArchiveResult : IAsyncDisposable
 {
@@ -85,7 +86,8 @@ public sealed class TarArchiveService : IArchiveService
             throw new ArchiveException($"source directory not found: {request.SourcePath}");
         }
 
-        var timestamp = request.Timestamp.ToString("yyyyMMdd_HHmmss");
+        // 毫秒后缀避免不同 job 在同一秒写同一 destination 时互相覆盖。
+        var timestamp = request.Timestamp.ToString("yyyyMMdd_HHmmss_fff");
         var archiveName = $"backup_{timestamp}.tar.gz";
         var directory = Path.Combine(
             request.TempDirectory,
@@ -102,7 +104,7 @@ public sealed class TarArchiveService : IArchiveService
                 new ProcessSpec(
                     _tarPath,
                     ["-czf", archivePath, "-C", request.SourcePath, "."],
-                    Timeout: TimeSpan.FromHours(6)),
+                    Timeout: request.Timeout ?? TimeSpan.FromHours(6)),
                 cancellationToken);
 
             if (result.TimedOut)
