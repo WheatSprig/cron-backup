@@ -155,10 +155,12 @@ for run in 1 2 3; do
 done
 
 echo "==> asserting retention"
-assert_eq "2" "$(count_objects minio:backups/integration/daily)" "S3 daily count"
+# 三次运行都在同一天：按本地日期去重后 daily 只应保留 1 份，
+# 这是「N 天」而不是「N 次运行」的关键断言。
+assert_eq "1" "$(count_objects minio:backups/integration/daily)" "S3 daily count (same-day dedupe)"
 assert_eq "1" "$(count_objects minio:backups/integration/weekly)" "S3 weekly count"
 assert_eq "1" "$(count_objects minio:backups/integration/monthly)" "S3 monthly count"
-assert_eq "2" "$(count_objects sftp:backup/integration/daily)" "SFTP daily count"
+assert_eq "1" "$(count_objects sftp:backup/integration/daily)" "SFTP daily count (same-day dedupe)"
 assert_eq "1" "$(count_objects sftp:backup/integration/weekly)" "SFTP weekly count"
 assert_eq "1" "$(count_objects sftp:backup/integration/monthly)" "SFTP monthly count"
 
@@ -179,16 +181,23 @@ cmp "$TEST_ROOT/source/hello.txt" "$TEST_ROOT/restore/sftp/hello.txt"
 cmp "$TEST_ROOT/source/nested/payload.bin" "$TEST_ROOT/restore/sftp/nested/payload.bin"
 
 echo "==> asserting prune"
-# touch 会创建一个零字节对象，再把它改成很旧的时间，作为 prune 候选。
-rclone_ls touch minio:backups/integration/daily/old-to-prune.tar.gz \
+# 造两个不同日期的旧对象；daily: 2 应保留今天和 2020，删掉更旧的 2019。
+rclone_ls touch minio:backups/integration/daily/backup_20200101_000000_000.tar.gz \
     --timestamp 2020-01-01T00:00:00Z
+rclone_ls touch minio:backups/integration/daily/backup_20190101_000000_000.tar.gz \
+    --timestamp 2019-01-01T00:00:00Z
 PRUNE_DRY_RUN="$(run_backup prune --job integration --config /config/config.yaml --log-level error)"
-grep -q "old-to-prune.tar.gz" <<< "$PRUNE_DRY_RUN"
+grep -q "backup_20190101_000000_000.tar.gz" <<< "$PRUNE_DRY_RUN"
 run_backup prune --job integration --config /config/config.yaml --apply --log-level error
-if rclone_ls lsf --files-only minio:backups/integration/daily | grep -q "old-to-prune.tar.gz"; then
-    echo "FAIL: prune did not delete old object" >&2
+if rclone_ls lsf --files-only minio:backups/integration/daily | grep -q "backup_20190101_000000_000.tar.gz"; then
+    echo "FAIL: prune did not delete the oldest day" >&2
     exit 1
 fi
+if ! rclone_ls lsf --files-only minio:backups/integration/daily | grep -q "backup_20200101_000000_000.tar.gz"; then
+    echo "FAIL: prune deleted more than the oldest day" >&2
+    exit 1
+fi
+assert_eq "2" "$(count_objects minio:backups/integration/daily)" "S3 daily count after prune"
 
 echo "==> asserting daemon health and SIGTERM"
 docker run -d --name "$DAEMON_NAME" --network "$NETWORK_NAME" \
