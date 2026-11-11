@@ -145,8 +145,11 @@ env 只负责凭据和全局默认：
 | `TZ` | 时区 |
 | `LOG_TARGET` | `console` 或 `file` |
 | `LOG_FILE` | 文件日志路径，默认 `/var/log/cron-backup/backup.log` |
+| `LOG_MAX_SIZE_MB` | 单个日志文件大小上限，默认 `50` |
+| `LOG_MAX_FILES` | 日志保留文件数，默认 `3` |
 | `DRY_RUN` | `true` 时不产生任何远端变更 |
 | `NOTIFY_URL` | 默认 webhook |
+| `CRONBACKUP_LOCK_DIR` | 跨容器共享的 job 锁目录 |
 
 支持 `${VAR}`、`${VAR:-default}` 和 `$${...}` 转义。不支持 `$VAR`、命令替换或递归插值。
 缺失变量会直接报配置错误。
@@ -308,6 +311,9 @@ cron-backup prune --config /config/config.yaml --apply
 cron-backup restore --job photos --latest --to /restore --extract
 ```
 
+`--extract` 目前只安全解压目录和普通文件；符号链接/硬链接条目会被拒绝，
+避免归档中的链接把文件写到目标目录之外。
+
 退出码：`0` 成功，`1` 参数错误，`2` 配置错误，`3` job 失败，`4` 已被锁占用。
 
 ---
@@ -344,11 +350,12 @@ HEALTHCHECK CMD ["/app/cron-backup", "health"]
 - 多阶段构建，self-contained 单文件发布
 - 运行时包含 rclone、GNU tar、bash、tzdata、ICU
 - 没有 crond
-- 默认支持 `linux/amd64`、`linux/arm64`；`linux/arm/v7` 可在 buildx 中验证后发布
+- 支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`
+- 稳定版同时发布 `v2.1.0`、`2.1.0`、`2.1`、`2`、`latest`
 
 ```bash
 docker buildx build \
-  --platform linux/amd64,linux/arm64 \
+  --platform linux/amd64,linux/arm64,linux/arm/v7 \
   -t ghcr.io/wheatsprig/cron-backup:2 .
 ```
 
