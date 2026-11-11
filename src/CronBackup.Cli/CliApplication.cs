@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using CronBackup.Core.Configuration;
 using CronBackup.Core.Execution;
+using CronBackup.Core.Rclone;
 using CronBackup.Core.Retention;
 using CronBackup.Core.Storage;
 using Microsoft.Extensions.Logging;
@@ -324,9 +325,13 @@ public static class CliApplication
 
         using var httpClient = new HttpClient();
         var processRunner = new SystemProcessRunner();
+        var storageFactory = new RcloneStorageBackendFactory(
+            new RcloneConfRenderer(),
+            new RcloneProcessSecretObscurer(),
+            processRunner);
         var runner = new JobRunner(
             new TarArchiveService(processRunner),
-            new DefaultStorageBackendFactory(),
+            storageFactory,
             new FileJobLockFactory(),
             new HookRunner(processRunner, loggerFactory.CreateLogger<HookRunner>()),
             new HttpNotifier(httpClient),

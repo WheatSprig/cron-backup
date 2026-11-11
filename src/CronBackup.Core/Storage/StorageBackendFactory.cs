@@ -4,25 +4,29 @@ namespace CronBackup.Core.Storage;
 
 public interface IStorageBackendFactory
 {
-    IStorageBackend Create(JobConfig job, DestinationConfig destination);
+    Task<IStorageBackend> CreateAsync(
+        JobConfig job,
+        DestinationConfig destination,
+        CancellationToken cancellationToken);
 }
 
 public sealed class DefaultStorageBackendFactory : IStorageBackendFactory
 {
-    public IStorageBackend Create(JobConfig job, DestinationConfig destination)
+    public Task<IStorageBackend> CreateAsync(
+        JobConfig job,
+        DestinationConfig destination,
+        CancellationToken cancellationToken)
     {
-        return destination.Kind.ToLowerInvariant() switch
+        if (destination.Kind.Equals("local", StringComparison.OrdinalIgnoreCase))
         {
-            "local" => new LocalBackend(
+            return Task.FromResult<IStorageBackend>(new LocalBackend(
                 destination.Path ??
                 throw new ConfigException(
                     $"jobs.{job.Name}.destinations.{destination.Name}.path",
-                    "local destination requires a path")),
-            "s3" or "sftp" or "rclone" => throw new NotSupportedException(
-                $"backend '{destination.Kind}' is not available in this build yet"),
-            _ => throw new ConfigException(
-                $"jobs.{job.Name}.destinations.{destination.Name}.kind",
-                $"unsupported destination kind '{destination.Kind}'"),
-        };
+                    "local destination requires a path")));
+        }
+
+        throw new NotSupportedException(
+            $"backend '{destination.Kind}' is not available in this build yet");
     }
 }

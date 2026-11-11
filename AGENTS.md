@@ -129,7 +129,7 @@ bool SupportsServerSideCopy { get; }
 - SFTP 的 `pass` 在 rclone.conf 中必须是 obscured 值。通过 `rclone obscure -`
   从 stdin 传入，**绝不放进 argv**。
 - 临时 rclone.conf：目录 `0700`、文件 `0600`，退出即删；启动时清扫过期残留。
-- 不设置全局 `RCLONE_CONFIG`，每次调用显式 `--config <tmp>` 并加 `--non-interactive`。
+- 不设置全局 `RCLONE_CONFIG`，每次调用显式 `--config <tmp>` 并加 `--ask-password=false`。
 - 不要记录 rclone 命令中的完整 key 之外的敏感信息；conf 内容永不进日志。
 
 ---

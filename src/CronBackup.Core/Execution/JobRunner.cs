@@ -221,7 +221,7 @@ public sealed class JobRunner
 
         try
         {
-            await using var backend = _storageFactory.Create(job, destination);
+            await using var backend = await _storageFactory.CreateAsync(job, destination, cancellationToken);
             var key = $"daily/{archive.FileName}";
 
             await _retryPolicy.ExecuteAsync(
