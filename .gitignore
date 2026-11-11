@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+*.user
+*.suo
+.vs/
+.idea/
+
+# Test output
+TestResults/
+coverage*.xml
+coverage*.json
+
+# Local configuration and secrets
+.env
+config/
+rclone.conf
+*.pem
+*.key
+*.pfx
+
+# Local data and logs
+data/
+logs/
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# AI workspace: only the convention file is tracked
+.agents/*
+!.agents/README.md
