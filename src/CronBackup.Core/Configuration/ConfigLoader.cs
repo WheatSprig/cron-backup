@@ -39,6 +39,9 @@ public sealed class ConfigLoader
         "INTERVAL_SECONDS",
     ];
 
+    // 配置发现顺序是硬约定：--config > CRONBACKUP_CONFIG > CRONBACKUP_CONFIG_YAML
+    // > /config/config.yaml > ./config.yaml > v1 env 隐式 job。
+    // 显式指定的文件不存在时必须报错，不能静默回落到隐式 job，否则会备份到错误目标。
     public ConfigLoadResult Load(ConfigLoadOptions options)
     {
         var environment = options.Environment;
@@ -59,6 +62,7 @@ public sealed class ConfigLoader
         var environmentPath = GetEnvironmentValue(environment, "CRONBACKUP_CONFIG");
         var inlineYaml = GetEnvironmentValue(environment, "CRONBACKUP_CONFIG_YAML");
 
+        // 两种“无文件”配置同时存在时无法判断用户意图，直接拒绝而不是猜。
         if (!string.IsNullOrWhiteSpace(environmentPath) && !string.IsNullOrWhiteSpace(inlineYaml))
         {
             throw new ConfigException(
@@ -95,6 +99,8 @@ public sealed class ConfigLoader
             throw new ConfigException("config", "no configuration file found");
         }
 
+        // 只有完全没有 config 时才读 v1 job 变量；有 config 时在 LoadFile 里忽略并 warning，
+        // 避免两套配置同时生效。
         foreach (var key in LegacyKeys)
         {
             if (!string.IsNullOrWhiteSpace(GetEnvironmentValue(environment, key)))
@@ -138,6 +144,7 @@ public sealed class ConfigLoader
             throw new ConfigException("config", "configuration is empty");
         }
 
+        // 保持严格模式：重复 key 和未知字段都报错，防止拼错字段后静默按默认值运行。
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .WithDuplicateKeyChecking()

@@ -17,6 +17,8 @@ public sealed class RcloneConfRenderer
         var destinations = new List<RenderedRcloneDestination>();
         var usedSectionNames = new HashSet<string>(StringComparer.Ordinal);
 
+        // section 名由 job/destination 生成并去重，用户不需要知道 rclone remote 名；
+        // 同一个 conf 里的所有 section 在进程退出时一起删除。
         foreach (var job in config.Jobs.Where(job => job.IsEnabled))
         {
             foreach (var destination in job.Destinations)
@@ -91,6 +93,8 @@ public sealed class RcloneConfRenderer
         Append(content, "user", destination.User);
         Append(content, "port", (destination.Port ?? 22).ToString());
 
+        // rclone 的 SFTP pass 必须是 obscured 值，明文会让它解密失败；
+        // 通过 stdin 调 rclone obscure，避免密码出现在进程参数里。
         if (!string.IsNullOrEmpty(destination.Password))
         {
             var obscured = await obscurer.ObscureAsync(destination.Password, cancellationToken);
@@ -117,6 +121,8 @@ public sealed class RcloneConfRenderer
             return;
         }
 
+        // 逃生口：type + options 原样透传，但已知密码字段和用户显式列出的字段
+        // 仍然走 obscure，避免把明文写进临时 conf。
         var explicitlyObscured = new HashSet<string>(
             destination.Obscure ?? [],
             StringComparer.OrdinalIgnoreCase);
@@ -138,6 +144,8 @@ public sealed class RcloneConfRenderer
         }
     }
 
+    // S3 的 root 是 bucket 内的 key 前缀，不能带前导斜杠；SFTP/rclone 的 root
+    // 保留用户写的绝对/相对形式，后续只补对象 key。
     private static string BuildBasePath(
         string kind,
         string sectionName,

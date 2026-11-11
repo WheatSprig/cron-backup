@@ -51,6 +51,9 @@ public static class RetentionPlanner
                 Array.Empty<PrunePlan>());
         }
 
+        // 提升规则：周日/每月 1 号执行；如果那天漏跑，下一次运行用“最近 7/31 天
+        // 没有 weekly/monthly”作为补跑条件。这里用滚动窗口而不是日历周/月，
+        // 避免周一补跑时把周日刚提升的对象又复制一次。
         var localNow = TimeZoneInfo.ConvertTime(now, timezone);
         var weeklyRecent = weekly.Any(item => item.Modified > now - WeeklyCatchUpWindow);
         var monthlyRecent = monthly.Any(item => item.Modified > now - MonthlyCatchUpWindow);
@@ -88,6 +91,8 @@ public static class RetentionPlanner
             .ThenByDescending(item => item.Key, StringComparer.Ordinal)
             .ToList();
 
+        // 保留最新 N 个；当前刚上传的 key 必须留在保留集合里。如果它恰好排在
+        // 第 N 名之外，就挤掉当前集合里最旧的一个，保证总数仍是 N。
         var retainedKeys = ordered
             .Take(keep)
             .Select(item => item.Key)
@@ -112,6 +117,8 @@ public static class RetentionPlanner
             .Where(item => !retainedKeys.Contains(item.Key))
             .ToList();
 
+        // 超过硬上限时整批中止，绝不“删一部分”。把 Candidates 留给 plan 输出，
+        // ToDelete 置空，调用方据此决定报警而不是部分执行。
         var aborted = candidates.Count > maxDelete;
         return new PrunePlan(
             tier,

@@ -40,6 +40,8 @@ public sealed class RcloneStorageBackendFactory : IStorageBackendFactory
                     "local destination requires a path"));
         }
 
+        // 只为当前 job 渲染 section；backend 持有 conf 文件，Dispose 时删除。
+        // 多个 destination 各自持有一份临时 conf，生命周期互不影响。
         var renderResult = await _renderer.RenderAsync(
             new RootConfig { Jobs = [job] },
             _obscurer,

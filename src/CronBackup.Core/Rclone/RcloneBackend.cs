@@ -50,6 +50,7 @@ public sealed class RcloneBackend : IStorageBackend
             ["lsjson", "--stat", BuildPath(key)],
             cancellationToken);
 
+        // rclone 用 3/4 表示目录/文件不存在；Stat 的语义就是“不存在返回 null”。
         if (result.ExitCode is 3 or 4)
         {
             return null;
@@ -128,6 +129,7 @@ public sealed class RcloneBackend : IStorageBackend
         string prefix,
         CancellationToken cancellationToken)
     {
+        // lsjson 返回的 Path 相对于被列出的目录，所以按 prefix 补齐成 backend 的完整 key。
         var normalizedPrefix = prefix.Replace('\\', '/').Trim('/');
         var remotePath = normalizedPrefix.Length == 0
             ? _destination.BasePath

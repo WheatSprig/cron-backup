@@ -516,6 +516,8 @@ public static class CliApplication
         }
     }
 
+    // 手动 prune 默认 dry-run；只有 --apply 且没有 DRY_RUN 时才真正删除。
+    // max_delete 超限时整批中止并返回非零，不做部分删除。
     private static async Task<int> PruneCommandAsync(
         CliOptions options,
         TextWriter output,
@@ -633,6 +635,7 @@ public static class CliApplication
         return failures.Count > 0 ? 3 : 0;
     }
 
+    // restore 只操作一个 destination；--extract 先下载到临时文件，再做防穿越解压。
     private static async Task<int> RestoreCommandAsync(
         CliOptions options,
         TextWriter output,
@@ -847,6 +850,8 @@ public static class CliApplication
         }
     }
 
+    // Docker healthcheck 只判断守护进程/调度器是否活着；备份失败交给通知。
+    // --strict 才额外把最近一次失败或连续失败计入 unhealthy。
     private static async Task<int> HealthCommandAsync(
         CliOptions options,
         TextWriter output,

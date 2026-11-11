@@ -16,6 +16,8 @@ public sealed class RcloneConfFile : IDisposable
 
     public string FilePath { get; }
 
+    // rclone.conf 里可能有 SFTP 密码等敏感信息。目录 0700、文件 0600，
+    // 生命周期跟随调用方，Dispose 时递归删除；异常路径也要清理。
     public static async Task<RcloneConfFile> CreateAsync(
         string content,
         string? temporaryRoot,

@@ -69,6 +69,9 @@ public sealed class JobRunner
         _healthStore = healthStore;
     }
 
+    // 单次 job 的顺序：锁 -> 通知 start -> pre hook -> 打包 -> 每个 destination
+    // 上传/校验/提升/清理 -> post hook -> 通知结果。post 和归档清理放在 finally，
+    // 保证失败路径也不会留下临时文件。
     public async Task<JobRunResult> RunAsync(
         RootConfig config,
         JobConfig job,
@@ -80,6 +83,7 @@ public sealed class JobRunner
             return new JobRunResult(job.Name, JobRunStatus.Skipped, null, Array.Empty<DestinationRunResult>(), null);
         }
 
+        // 同一个 job 只允许一个实例；调度器触发重叠时直接返回 Locked，不阻塞等待。
         var startedAt = _timeProvider.GetUtcNow();
         await using var lockResult = await _lockFactory.TryAcquireAsync(job.Name, cancellationToken);
         if (!lockResult.Acquired)
@@ -116,6 +120,8 @@ public sealed class JobRunner
         {
             await NotifyAsync(notifyTargets, NotificationPhase.Start, job, false, string.Empty, now, cancellationToken);
 
+            // pre hook 在打包之前跑，允许它把数据库 dump 写进 source 目录。
+            // pre 失败就不再产生归档，避免把不完整的数据上传。
             if (hooks?.Pre is { Count: > 0 })
             {
                 var preResult = await _hookRunner.RunAsync(
@@ -139,6 +145,7 @@ public sealed class JobRunner
                 archiveName = archive.FileName;
                 postContext = postContext with { ArchivePath = archive.ArchivePath };
 
+                // 一个 destination 失败不阻断其他 destination；最终 job 状态取全部结果。
                 foreach (var destination in job.Destinations)
                 {
                     destinationResults.Add(await RunDestinationAsync(
@@ -168,6 +175,7 @@ public sealed class JobRunner
         }
         finally
         {
+            // post hook 始终执行，拿到的是本地归档路径；随后再做临时目录清理。
             if (hooks?.Post is { Count: > 0 })
             {
                 var postResult = await _hookRunner.RunAsync(
@@ -278,6 +286,7 @@ public sealed class JobRunner
                 job.Retention,
                 destination.Retention);
 
+            // retention 关闭时只上传，不 list、不提升、不删除。
             if (policy.Enabled)
             {
                 var daily = await backend.ListAsync("daily", cancellationToken);
@@ -445,6 +454,7 @@ public sealed class JobRunner
         ArchiveResult archive,
         CancellationToken cancellationToken)
     {
+        // 提升保持原文件名，目标已存在就跳过：同一天重复运行不会产生重复副本。
         var targetKey = $"{tier}/{archive.FileName}";
         var existing = await backend.StatAsync(targetKey, cancellationToken);
         if (existing is not null)

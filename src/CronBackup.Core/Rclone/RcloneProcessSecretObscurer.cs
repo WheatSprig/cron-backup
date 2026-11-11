@@ -35,6 +35,7 @@ public sealed class RcloneProcessSecretObscurer : IRcloneSecretObscurer
 
         try
         {
+            // 密码只走 stdin，不出现在进程 argv 里；rclone obscure - 读第一行。
             await process.StandardInput.WriteLineAsync(secret);
             process.StandardInput.Close();
 

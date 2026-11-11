@@ -5,6 +5,8 @@ namespace CronBackup.Core.Configuration;
 
 public static class ConfigInterpolator
 {
+    // 只遍历字符串属性/字典值；数字和布尔字段如果在 YAML 里写 ${VAR}，
+    // 会在 YamlDotNet 反序列化阶段就失败，这里不做隐式类型转换。
     public static void Interpolate(RootConfig config, EnvInterpolator interpolator)
     {
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);

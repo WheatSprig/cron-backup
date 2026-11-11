@@ -5,6 +5,8 @@ namespace CronBackup.Core.Execution;
 
 public static class TarExtractor
 {
+    // 恢复的归档来自远端，不能信任条目路径。这里只接受目录和普通文件，
+    // 每个条目都做 root 约束；符号链接/硬链接暂不支持，直接报错而不是冒险解压。
     public static async Task ExtractTarGzAsync(
         string archivePath,
         string destination,

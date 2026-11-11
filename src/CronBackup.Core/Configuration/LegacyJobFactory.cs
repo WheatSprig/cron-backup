@@ -4,6 +4,8 @@ namespace CronBackup.Core.Configuration;
 
 public static class LegacyJobFactory
 {
+    // v1 兼容层：把 BACKUP_SRC / RCLONE_* / CRON_SCHEDULE 翻译成一个隐式 job。
+    // 这里刻意不启用 retention，保证“升级不自动删旧备份”。
     public static RootConfig Create(IReadOnlyDictionary<string, string?> environment)
     {
         var job = new JobConfig
@@ -123,6 +125,8 @@ public static class LegacyJobFactory
                     $"RCLONE_{remoteName}_PORT") ?? 22;
                 break;
 
+            // v1 的 drive 没有专门的建模，走 rclone 逃生口；token 不是密码字段，
+            // client_secret 会在 conf 渲染时按已知密钥字段处理。
             case "drive":
                 destination.Kind = "rclone";
                 destination.Type = "drive";
@@ -154,6 +158,8 @@ public static class LegacyJobFactory
         }
     }
 
+    // 保持 v1 的路径语义：空或 "/" 表示 remote 根目录；其余去掉首尾斜杠，
+    // 避免后续拼出 // 或 :/ 这类 rclone 路径。
     private static string NormalizeRoot(string value)
     {
         var trimmed = value.Trim();

@@ -50,6 +50,8 @@ public sealed class FileJobLockFactory : IJobLockFactory
         Directory.CreateDirectory(_lockDirectory);
         var path = Path.Combine(_lockDirectory, Sanitize(jobName) + ".lock");
 
+        // FileShare.None 在 Unix 上由 .NET 映射为 flock；进程退出时 OS 自动释放，
+        // 所以不需要扫描“陈旧锁”。锁文件保留，下一次打开时截断重写即可。
         try
         {
             var stream = new FileStream(

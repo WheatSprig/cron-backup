@@ -75,6 +75,7 @@ public sealed class HttpNotifier : INotifier
             {
                 throw;
             }
+            // 通知是旁路：单个目标失败只返回结果，不让调用方把备份判成失败。
             catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
             {
                 results.Add(new NotificationResult(target.Kind, false, exception.Message));
@@ -113,6 +114,7 @@ public sealed class HttpNotifier : INotifier
         NotificationPhase phase,
         NotificationMessage message)
     {
+        // healthchecks.io 用 URL 后缀表示阶段：/start、/fail，成功直接打基础 URL。
         if (target.Kind.Equals("healthchecks", StringComparison.OrdinalIgnoreCase))
         {
             var url = target.Url!;

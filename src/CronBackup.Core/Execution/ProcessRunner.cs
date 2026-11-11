@@ -95,6 +95,7 @@ public sealed class SystemProcessRunner : IProcessRunner
             {
                 await process.WaitForExitAsync(linkedSource.Token);
             }
+            // 超时和外部取消都要杀掉整个进程树，避免 rclone/tar 留下子进程。
             catch (OperationCanceledException)
             {
                 timedOut = timeoutSource?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested;

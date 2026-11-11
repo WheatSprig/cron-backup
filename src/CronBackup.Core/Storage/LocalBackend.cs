@@ -63,6 +63,7 @@ public sealed class LocalBackend : IStorageBackend
             ?? throw new InvalidOperationException($"cannot determine parent directory for '{target}'");
         Directory.CreateDirectory(parent);
 
+        // 先写同目录临时文件再原子移动，避免进程中断后远端出现半个归档。
         var temporaryPath = Path.Combine(parent, $".{Path.GetFileName(target)}.tmp-{Guid.NewGuid():N}");
         try
         {
@@ -182,6 +183,8 @@ public sealed class LocalBackend : IStorageBackend
             new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero));
     }
 
+    // 所有 key 必须是相对路径。除了拒绝绝对路径和 "."/".." 段，最后还要用
+    // GetFullPath 做一次 root 约束，防止符号链接或平台路径规则绕过。
     private string Resolve(string key)
     {
         if (key.StartsWith('/') || key.StartsWith('\\'))

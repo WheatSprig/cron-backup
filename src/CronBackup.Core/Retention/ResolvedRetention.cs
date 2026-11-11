@@ -14,6 +14,8 @@ public sealed record ResolvedRetention(
 
 public static class RetentionResolver
 {
+    // 逐字段覆盖：defaults < job < destination。job 上的 enabled:false 是硬关闭，
+    // destination 不能反向开启；tier 用 0 表示“不管理这一层”。
     public static ResolvedRetention Resolve(
         RetentionPolicy? defaults,
         RetentionPolicy? job,

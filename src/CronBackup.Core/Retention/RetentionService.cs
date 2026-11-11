@@ -34,6 +34,8 @@ public static class RetentionService
             currentKey);
     }
 
+    // 调用方应先把 plan 展示给用户；这里只执行已经算好的 ToDelete。
+    // 任一 tier 超限都拒绝整批删除，避免“删一半”造成不可控状态。
     public static async Task<IReadOnlyList<string>> ApplyAsync(
         IStorageBackend backend,
         RetentionPlan plan,

@@ -28,10 +28,10 @@ public sealed class EnvInterpolator
                 continue;
             }
 
+            // $${VAR} 是转义写法：写入一个临时标记，避免第二轮再被识别为占位符，
+            // 最后统一把标记换回 '$'。Docker Compose 场景依赖这条规则。
             if (index + 2 < value.Length && value[index + 1] == '$' && value[index + 2] == '{')
             {
-                // $${VAR} is an escaped placeholder: emit a marker so the literal
-                // ${VAR} is not expanded, then restore the dollar sign at the end.
                 result.Append('\u0001');
                 index++;
                 continue;
@@ -59,6 +59,7 @@ public sealed class EnvInterpolator
                 throw new ConfigException(fieldPath, $"invalid environment variable name '{variableName}'");
             }
 
+            // 与 shell 的 ${VAR:-default} 对齐：变量未设置或为空串时都取默认值。
             if (_environment.TryGetValue(variableName, out var environmentValue) &&
                 !string.IsNullOrEmpty(environmentValue))
             {

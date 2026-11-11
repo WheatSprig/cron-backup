@@ -158,6 +158,8 @@ public sealed partial class ConfigValidator
             }
         }
 
+        // disabled job 允许暂时没有 source/destination，但仍校验 name、schedule、
+        // retention 等结构，避免在重新启用时才发现配置坏了。
         if (!job.IsEnabled)
         {
             return;

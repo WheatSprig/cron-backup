@@ -93,6 +93,8 @@ public sealed class FileHealthStore : IHealthStore
         return await JsonSerializer.DeserializeAsync<HealthState>(stream, JsonOptions, cancellationToken);
     }
 
+    // 先写临时文件再 rename，避免 health 读到半个 JSON；状态文件不含密钥，
+    // 因此允许同组/其他用户读取，便于容器内 healthcheck 使用。
     private async Task WriteWithoutLockAsync(HealthState state, CancellationToken cancellationToken)
     {
         var directory = System.IO.Path.GetDirectoryName(FilePath);

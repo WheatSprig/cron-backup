@@ -21,6 +21,8 @@ public sealed class CronScheduler
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    // 每个 job 一个独立循环：启动时先跑一轮（与 v1 entrypoint 行为一致），
+    // 之后按 cron 或 interval 等待；job 之间并行，靠 JobRunner 的锁防同一 job 重入。
     public async Task RunAsync(
         RootConfig config,
         Func<JobConfig, CancellationToken, Task> runJob,
@@ -32,6 +34,7 @@ public sealed class CronScheduler
             return;
         }
 
+        // 先写健康状态再启动 job，避免首轮 job 很快完成时把初始化状态覆盖掉。
         var now = _timeProvider.GetUtcNow();
         if (_healthStore is not null)
         {
@@ -182,7 +185,7 @@ public sealed class CronScheduler
 
     private async Task DelayForAsync(TimeSpan delay, CancellationToken cancellationToken)
     {
-        // TimeProvider-backed Task.Delay rejects delays outside the platform timer range.
+        // Task.Delay 不接受超过平台计时器上限的时长；按天切片，年调度也能安全等待。
         var chunk = delay > TimeSpan.FromDays(1) ? TimeSpan.FromDays(1) : delay;
         await Task.Delay(chunk, _timeProvider, cancellationToken);
     }

@@ -97,6 +97,7 @@ public sealed class TarArchiveService : IArchiveService
         var archivePath = Path.Combine(directory, archiveName);
         try
         {
+            // v1 的 GNU tar 语义：-C source .，保留相对路径、权限和符号链接。
             var result = await _processRunner.RunAsync(
                 new ProcessSpec(
                     _tarPath,
