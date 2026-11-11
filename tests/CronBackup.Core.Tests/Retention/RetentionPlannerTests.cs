@@ -171,6 +171,47 @@ public sealed class RetentionPlannerTests
     }
 
     [Fact]
+    public void BuildPlan_ShouldApplyMaxDeleteAcrossTiers()
+    {
+        // 三档各有 3 个候选，max_delete=4 应作为全局预算：
+        // daily 先用掉 3，weekly 再用 1，monthly 全部留到下次。
+        var now = new DateTimeOffset(2026, 11, 11, 13, 0, 0, TimeSpan.Zero);
+        var policy = new ResolvedRetention(true, Daily: 1, Weekly: 1, Monthly: 1, MaxDelete: 4);
+
+        var daily = Objects(
+            ("daily/backup_20261101_000000_000.tar.gz", now.AddDays(-10)),
+            ("daily/backup_20261102_000000_000.tar.gz", now.AddDays(-9)),
+            ("daily/backup_20261103_000000_000.tar.gz", now.AddDays(-8)),
+            ("daily/backup_20261111_000000_000.tar.gz", now));
+        var weekly = Objects(
+            ("weekly/backup_20261001_000000_000.tar.gz", now.AddDays(-40)),
+            ("weekly/backup_20261008_000000_000.tar.gz", now.AddDays(-33)),
+            ("weekly/backup_20261015_000000_000.tar.gz", now.AddDays(-26)),
+            ("weekly/backup_20261108_000000_000.tar.gz", now.AddDays(-3)));
+        var monthly = Objects(
+            ("monthly/backup_20260501_000000_000.tar.gz", now.AddDays(-190)),
+            ("monthly/backup_20260601_000000_000.tar.gz", now.AddDays(-160)),
+            ("monthly/backup_20260701_000000_000.tar.gz", now.AddDays(-130)),
+            ("monthly/backup_20261101_000000_000.tar.gz", now.AddDays(-10)));
+
+        var plan = RetentionPlanner.BuildPlan(
+            policy, daily, weekly, monthly, now, TimeZoneInfo.Utc);
+
+        var dailyPlan = plan.Prune.Single(item => item.Tier == StorageTier.Daily);
+        var weeklyPlan = plan.Prune.Single(item => item.Tier == StorageTier.Weekly);
+        var monthlyPlan = plan.Prune.Single(item => item.Tier == StorageTier.Monthly);
+
+        Assert.Equal(3, dailyPlan.ToDelete.Count);
+        Assert.Empty(dailyPlan.Deferred);
+        Assert.Single(weeklyPlan.ToDelete);
+        Assert.Equal(2, weeklyPlan.Deferred.Count);
+        Assert.Empty(monthlyPlan.ToDelete);
+        Assert.Equal(3, monthlyPlan.Deferred.Count);
+        Assert.Equal(5, plan.PendingDeletes);
+        Assert.Equal(4, plan.Prune.Sum(item => item.ToDelete.Count));
+    }
+
+    [Fact]
     public void BuildPlan_ShouldUseKeyTimestampForWeeklyCatchUp()
     {
         var tz = TimeZoneInfo.Utc;

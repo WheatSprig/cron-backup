@@ -219,8 +219,8 @@ jobs:
 - 不配置 retention：不提升、不清理；
 - 归档时间戳来自文件名（`backup_yyyyMMdd_HHmmss_fff.tar.gz`，兼容无毫秒旧名）；
   解析不出来时才回退到对象 `Modified`；
-- 候选数超过 `max_delete` 时本轮只删 `max_delete` 个，剩余数量会在输出和日志里报告，
-  下次运行继续；
+- 候选超过 `max_delete` 时按 `daily → weekly → monthly` 顺序共用一个单轮预算：
+  本轮合计只删 `max_delete` 个，剩余数量会在输出和日志里报告，下次运行继续；
 - `prune` 手动执行默认 dry-run，加 `--apply` 才删除。
 
 远端布局：
