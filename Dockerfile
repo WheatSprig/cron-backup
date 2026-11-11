@@ -2,7 +2,9 @@
 
 ARG RCLONE_VERSION=1.76.0
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
+# SDK 阶段固定跑在构建机架构：arm/v7 的 .NET SDK 镜像不完整，
+# 用 amd64 SDK 交叉发布 linux-arm，避免在 QEMU 里跑 restore。
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
 ARG TARGETARCH
 ARG TARGETVARIANT
 WORKDIR /src
