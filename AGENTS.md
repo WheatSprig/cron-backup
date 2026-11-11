@@ -152,7 +152,9 @@ bool SupportsServerSideCopy { get; }
 - Linux 上调用 GNU `tar`，保持 v1 的 `-C <source> .` 语义；
   纯 .NET 归档只作为跨平台测试替身，不作为默认生产路径。
 - 多 job 的临时归档使用独立目录；成功、失败、取消都要清理。
-- 归档名默认 `backup_<YYYYMMDD_HHMMSS>.tar.gz`，与 v1 保持可识别。
+- `archive.format` 支持 `tar.gz`（默认，`-czf`）和 `tar`（`-cf`，不压缩）；
+  源目录本身已是压缩文件时用 `tar`，避免二次压缩。
+- 归档名固定 `backup_<YYYYMMDD_HHMMSS_fff>.tar[.gz]`，与 v1 保持可识别。
 
 ### 5.3 hooks
 

@@ -11,7 +11,7 @@ defaults:
     monthly: 6
     max_delete: 20
   archive:
-    format: tar.gz
+    format: tar.gz   # tar.gz | tar；源目录已是压缩文件时用 tar
     temp_dir: /tmp
     timeout_seconds: 21600
 

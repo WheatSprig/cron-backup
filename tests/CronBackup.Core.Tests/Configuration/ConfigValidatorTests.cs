@@ -165,6 +165,28 @@ public sealed class ConfigValidatorTests
     }
 
     [Fact]
+    public void Validate_ShouldAcceptPlainTarArchiveFormat()
+    {
+        var config = CreateValidConfig();
+        config.Jobs[0].Archive = new ArchiveOptions { Format = "tar" };
+
+        var result = new ConfigValidator().Validate(config);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void Validate_ShouldRejectUnknownArchiveFormat()
+    {
+        var config = CreateValidConfig();
+        config.Jobs[0].Archive = new ArchiveOptions { Format = "zip" };
+
+        var result = new ConfigValidator().Validate(config);
+
+        Assert.Contains(result.Errors, issue => issue.Path.EndsWith(".format", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Validate_ShouldRejectNonPositiveArchiveTimeout()
     {
         var config = CreateValidConfig();

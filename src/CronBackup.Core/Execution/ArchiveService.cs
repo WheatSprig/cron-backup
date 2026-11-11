@@ -5,7 +5,8 @@ public sealed record ArchiveRequest(
     string SourcePath,
     string TempDirectory,
     DateTimeOffset Timestamp,
-    TimeSpan? Timeout = null);
+    TimeSpan? Timeout = null,
+    string? Format = null);
 
 public sealed class ArchiveResult : IAsyncDisposable
 {
@@ -88,7 +89,8 @@ public sealed class TarArchiveService : IArchiveService
 
         // 毫秒后缀避免不同 job 在同一秒写同一 destination 时互相覆盖。
         var timestamp = request.Timestamp.ToString("yyyyMMdd_HHmmss_fff");
-        var archiveName = $"backup_{timestamp}.tar.gz";
+        var format = ArchiveNaming.Normalize(request.Format);
+        var archiveName = ArchiveNaming.FileName(request.Timestamp, format);
         var directory = Path.Combine(
             request.TempDirectory,
             "cron-backup",
@@ -99,11 +101,13 @@ public sealed class TarArchiveService : IArchiveService
         var archivePath = Path.Combine(directory, archiveName);
         try
         {
+            // tar.gz 用 -czf 压缩；tar 用 -cf 只打包，避免对已压缩内容二次压。
             // v1 的 GNU tar 语义：-C source .，保留相对路径、权限和符号链接。
+            var createFlag = format == ArchiveNaming.Tar ? "-cf" : "-czf";
             var result = await _processRunner.RunAsync(
                 new ProcessSpec(
                     _tarPath,
-                    ["-czf", archivePath, "-C", request.SourcePath, "."],
+                    [createFlag, archivePath, "-C", request.SourcePath, "."],
                     Timeout: request.Timeout ?? TimeSpan.FromHours(6)),
                 cancellationToken);
 

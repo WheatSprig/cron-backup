@@ -233,6 +233,21 @@ jobs:
 
 周日和每月 1 号做服务端复制提升；错过时按最近 7/31 天补跑，目标 key 已存在则跳过。
 
+### archive
+
+```yaml
+archive:
+  format: tar.gz   # tar.gz（默认，压缩）或 tar（只打包）
+  temp_dir: /tmp
+  timeout_seconds: 21600
+```
+
+`format: tar` 只调用 `tar -cf`，不压缩，适合 source 目录里已经是 `.sql.gz`
+等压缩文件的场景（例如 postgres-backup-local），避免对 4 GB 的库压缩两遍。
+
+归档名固定为 `backup_<yyyyMMdd_HHmmss_fff>.tar.gz` 或 `.tar`，保留策略按名字里的
+时间戳判断日期。
+
 ### hooks
 
 ```yaml

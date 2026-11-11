@@ -143,7 +143,7 @@ public sealed class JobRunner
             if (failures.Count == 0)
             {
                 archive = await _archiveService.CreateAsync(
-                    new ArchiveRequest(job.Name, job.Source.Path, tempDirectory, localNow, archiveTimeout),
+                    new ArchiveRequest(job.Name, job.Source.Path, tempDirectory, localNow, archiveTimeout, archiveOptions?.Format),
                     cancellationToken);
                 archiveName = archive.FileName;
                 postContext = postContext with { ArchivePath = archive.ArchivePath };

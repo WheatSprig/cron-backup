@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using CronBackup.Core.Execution;
 using Cronos;
 
 namespace CronBackup.Core.Configuration;
@@ -363,9 +364,12 @@ public sealed partial class ConfigValidator
         }
 
         if (archive.Format is not null &&
-            !string.Equals(archive.Format, "tar.gz", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(archive.Format, ArchiveNaming.TarGz, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(archive.Format, ArchiveNaming.Tar, StringComparison.OrdinalIgnoreCase))
         {
-            result.Errors.Add(new ValidationIssue($"{path}.format", "only 'tar.gz' is supported"));
+            result.Errors.Add(new ValidationIssue(
+                $"{path}.format",
+                "expected 'tar.gz' or 'tar'"));
         }
 
         if (archive.TempDir is not null && string.IsNullOrWhiteSpace(archive.TempDir))

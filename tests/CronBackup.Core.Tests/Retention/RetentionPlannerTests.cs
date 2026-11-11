@@ -239,6 +239,9 @@ public sealed class RetentionPlannerTests
         Assert.True(ArchiveKey.TryGetTimestamp("daily/backup_20261111_063000.tar.gz", out var legacy));
         Assert.Equal(new DateTime(2026, 11, 11, 6, 30, 0), legacy);
 
+        Assert.True(ArchiveKey.TryGetTimestamp("daily/backup_20261111_063000_123.tar", out var plainTar));
+        Assert.Equal(new DateTime(2026, 11, 11, 6, 30, 0, 123), plainTar);
+
         Assert.False(ArchiveKey.TryGetTimestamp("daily/manual-upload.sql.gz", out _));
     }
 

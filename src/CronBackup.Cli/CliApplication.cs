@@ -748,15 +748,19 @@ public static class CliApplication
 
         if (options.Extract)
         {
+            // 扩展名只用于临时文件；真正的 gzip 判断在 TarExtractor 里按文件头做。
+            var temporaryExtension = key.EndsWith(".tar", StringComparison.Ordinal)
+                ? ".tar"
+                : ".tar.gz";
             var temporaryPath = Path.Combine(
                 Path.GetTempPath(),
                 "cron-backup",
-                $"restore-{Guid.NewGuid():N}.tar.gz");
+                $"restore-{Guid.NewGuid():N}{temporaryExtension}");
             Directory.CreateDirectory(Path.GetDirectoryName(temporaryPath)!);
             try
             {
                 await backend.DownloadAsync(key, temporaryPath, cancellationToken);
-                await TarExtractor.ExtractTarGzAsync(temporaryPath, destinationRoot, cancellationToken);
+                await TarExtractor.ExtractAsync(temporaryPath, destinationRoot, cancellationToken);
             }
             finally
             {
