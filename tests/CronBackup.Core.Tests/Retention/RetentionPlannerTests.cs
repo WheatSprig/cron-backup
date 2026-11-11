@@ -86,7 +86,39 @@ public sealed class RetentionPlannerTests
         Assert.Equal(2, prune.ToDelete.Count);
         Assert.Contains(prune.ToDelete, item => item.Key == "daily/oldest");
         Assert.Contains(prune.ToDelete, item => item.Key == "daily/older");
-        Assert.False(prune.Aborted);
+        Assert.False(prune.Truncated);
+    }
+
+    [Fact]
+    public void BuildPlan_ShouldKeepOneObjectPerLocalDay()
+    {
+        var tz = TimeZoneInfo.Utc;
+        var now = new DateTimeOffset(2026, 11, 11, 13, 0, 0, TimeSpan.Zero);
+        var policy = new ResolvedRetention(true, Daily: 2, Weekly: 0, Monthly: 0, MaxDelete: 20);
+
+        var daily = new[]
+        {
+            new RemoteObject("daily/backup_20261109_063000_000.tar.gz", 10, now.AddDays(-2)),
+            new RemoteObject("daily/backup_20261110_063000_000.tar.gz", 10, now.AddDays(-1)),
+            new RemoteObject("daily/backup_20261111_063000_000.tar.gz", 10, now),
+            new RemoteObject("daily/backup_20261111_120000_000.tar.gz", 10, now), // 同一天第二次
+        };
+
+        var plan = RetentionPlanner.BuildPlan(
+            policy,
+            daily,
+            Array.Empty<RemoteObject>(),
+            Array.Empty<RemoteObject>(),
+            now,
+            tz,
+            "daily/backup_20261111_120000_000.tar.gz");
+
+        var prune = Assert.Single(plan.Prune, item => item.Tier == StorageTier.Daily);
+
+        // 保留 11-11（12:00）和 11-10；删掉同日较早的一份和 11-09
+        Assert.Equal(
+            new[] { "daily/backup_20261109_063000_000.tar.gz", "daily/backup_20261111_063000_000.tar.gz" },
+            prune.ToDelete.Select(item => item.Key).OrderBy(key => key));
     }
 
     [Fact]
@@ -112,7 +144,7 @@ public sealed class RetentionPlannerTests
     }
 
     [Fact]
-    public void BuildPlan_ShouldAbortWhenCandidatesExceedMaxDelete()
+    public void BuildPlan_ShouldTruncateWhenCandidatesExceedMaxDelete()
     {
         var daily = Objects(
             ("daily/one", Now.AddDays(-5)),
@@ -131,9 +163,42 @@ public sealed class RetentionPlannerTests
             TimeZoneInfo.Utc);
 
         var prune = Assert.Single(plan.Prune, item => item.Tier == StorageTier.Daily);
-        Assert.True(prune.Aborted);
-        Assert.Empty(prune.ToDelete);
+        Assert.True(prune.Truncated);
         Assert.Equal(4, prune.Candidates.Count);
+        Assert.Equal(2, prune.ToDelete.Count);
+        Assert.Equal(2, prune.Deferred.Count);
+        Assert.Equal(2, plan.PendingDeletes);
+    }
+
+    [Fact]
+    public void BuildPlan_ShouldUseKeyTimestampForWeeklyCatchUp()
+    {
+        var tz = TimeZoneInfo.Utc;
+        var now = new DateTimeOffset(2026, 11, 11, 13, 0, 0, TimeSpan.Zero);
+        var policy = new ResolvedRetention(true, Daily: 0, Weekly: 5, Monthly: 0, MaxDelete: 20);
+
+        // mtime 很新，但 key 里的日期是 40 天前 —— 不应算作「最近有周备」
+        var weekly = new[]
+        {
+            new RemoteObject("weekly/backup_20261002_063000_000.tar.gz", 10, now.AddHours(-1)),
+        };
+
+        var plan = RetentionPlanner.BuildPlan(
+            policy, Array.Empty<RemoteObject>(), weekly, Array.Empty<RemoteObject>(), now, tz);
+
+        Assert.True(plan.Promotion.Weekly);
+    }
+
+    [Fact]
+    public void ArchiveKey_ShouldParseLegacyAndV2Names()
+    {
+        Assert.True(ArchiveKey.TryGetTimestamp("daily/backup_20261111_063000_123.tar.gz", out var v2));
+        Assert.Equal(new DateTime(2026, 11, 11, 6, 30, 0, 123), v2);
+
+        Assert.True(ArchiveKey.TryGetTimestamp("daily/backup_20261111_063000.tar.gz", out var legacy));
+        Assert.Equal(new DateTime(2026, 11, 11, 6, 30, 0), legacy);
+
+        Assert.False(ArchiveKey.TryGetTimestamp("daily/manual-upload.sql.gz", out _));
     }
 
     [Fact]
