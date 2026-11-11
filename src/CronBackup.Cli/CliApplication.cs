@@ -1,10 +1,13 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using CronBackup.Cli.Logging;
 using CronBackup.Core.Configuration;
 using CronBackup.Core.Execution;
+using CronBackup.Core.Health;
 using CronBackup.Core.Rclone;
 using CronBackup.Core.Retention;
+using CronBackup.Core.Scheduling;
 using CronBackup.Core.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +18,7 @@ public static class CliApplication
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
     public static async Task<int> RunAsync(
@@ -51,9 +55,9 @@ public static class CliApplication
                 "plan" => await PlanAsync(options, standardOutput, standardError, cancellationToken),
                 "list" => await ListAsync(options, standardOutput, standardError, cancellationToken),
                 "run" => await RunCommandAsync(options, standardOutput, standardError, cancellationToken),
-                "prune" => await NotImplementedAsync("prune", standardOutput, standardError),
-                "restore" => await NotImplementedAsync("restore", standardOutput, standardError),
-                "health" => await NotImplementedAsync("health", standardOutput, standardError),
+                "prune" => await PruneCommandAsync(options, standardOutput, standardError, cancellationToken),
+                "restore" => await RestoreCommandAsync(options, standardOutput, standardError, cancellationToken),
+                "health" => await HealthCommandAsync(options, standardOutput, standardError),
                 _ => await UnknownCommandAsync(options.Command, standardError),
             };
         }
@@ -65,6 +69,11 @@ public static class CliApplication
         catch (OperationCanceledException)
         {
             return 130;
+        }
+        catch (Exception exception)
+        {
+            await standardError.WriteLineAsync($"error: {exception.Message}");
+            return 3;
         }
     }
 
@@ -234,6 +243,17 @@ public static class CliApplication
             return 2;
         }
 
+        if (options.Remote)
+        {
+            return await ListRemoteAsync(
+                loaded.Config,
+                jobs,
+                options,
+                output,
+                error,
+                cancellationToken);
+        }
+
         if (options.Json)
         {
             var jobModels = jobs.Select(job => new
@@ -308,15 +328,34 @@ public static class CliApplication
             return 2;
         }
 
-        if (!options.Once && jobs.Any(job => job.Schedule is not null || job.IntervalSeconds is not null))
-        {
-            await error.WriteLineAsync("error: daemon scheduling is not implemented in this build; use --once");
-            return 1;
-        }
+        var runOnce = options.Once ||
+                      options.DryRun ||
+                      jobs.All(job => job.Schedule is null && job.IntervalSeconds is null);
 
+        var logLevel = ParseLogLevel(options.LogLevel);
+        var logTarget = loaded.Config.Defaults.LogTarget ??
+                        Environment.GetEnvironmentVariable("LOG_TARGET") ??
+                        "console";
         using var loggerFactory = LoggerFactory.Create(builder =>
         {
-            builder.SetMinimumLevel(ParseLogLevel(options.LogLevel));
+            builder.SetMinimumLevel(logLevel);
+            if (string.Equals(logTarget, "file", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    builder.AddProvider(new FileLoggerProvider(
+                        Environment.GetEnvironmentVariable("LOG_FILE") ?? "/var/log/backup.log",
+                        logLevel));
+                    return;
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+
             builder.AddConsole(console =>
             {
                 console.LogToStandardErrorThreshold = LogLevel.Trace;
@@ -329,29 +368,108 @@ public static class CliApplication
             new RcloneConfRenderer(),
             new RcloneProcessSecretObscurer(),
             processRunner);
+        var healthStore = new FileHealthStore(
+            Environment.GetEnvironmentVariable("CRONBACKUP_STATUS_FILE"));
         var runner = new JobRunner(
             new TarArchiveService(processRunner),
             storageFactory,
             new FileJobLockFactory(),
             new HookRunner(processRunner, loggerFactory.CreateLogger<HookRunner>()),
             new HttpNotifier(httpClient),
-            loggerFactory.CreateLogger<JobRunner>());
+            loggerFactory.CreateLogger<JobRunner>(),
+            healthStore: healthStore);
 
-        var results = new List<JobRunResult>();
-        foreach (var job in jobs)
+        if (runOnce)
         {
-            results.Add(await runner.RunAsync(
-                loaded.Config,
-                job,
-                new JobRunOptions(options.DryRun),
-                cancellationToken));
+            var results = new List<JobRunResult>();
+            foreach (var job in jobs)
+            {
+                results.Add(await runner.RunAsync(
+                    loaded.Config,
+                    job,
+                    new JobRunOptions(options.DryRun),
+                    cancellationToken));
+            }
+
+            await WriteRunResultsAsync(options, loaded.Config, results, output);
+            if (results.Any(result => result.Status == JobRunStatus.Locked))
+            {
+                return 4;
+            }
+
+            return results.All(result => result.Status is JobRunStatus.Success or JobRunStatus.Skipped) ? 0 : 3;
         }
 
+        using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            shutdown.Cancel();
+        };
+        Console.CancelKeyPress += cancelHandler;
+
+        PosixSignalRegistration? sigterm = null;
+        PosixSignalRegistration? sigint = null;
+        if (!OperatingSystem.IsWindows())
+        {
+            sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+            {
+                context.Cancel = true;
+                shutdown.Cancel();
+            });
+            sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, context =>
+            {
+                context.Cancel = true;
+                shutdown.Cancel();
+            });
+        }
+
+        try
+        {
+            var schedulerConfig = new RootConfig
+            {
+                Version = loaded.Config.Version,
+                Defaults = loaded.Config.Defaults,
+                Jobs = jobs,
+            };
+            var scheduler = new CronScheduler(
+                loggerFactory.CreateLogger<CronScheduler>(),
+                healthStore);
+            await output.WriteLineAsync("scheduler started");
+            await scheduler.RunAsync(
+                schedulerConfig,
+                async (job, token) =>
+                {
+                    await runner.RunAsync(
+                        schedulerConfig,
+                        job,
+                        new JobRunOptions(options.DryRun),
+                        token);
+                },
+                shutdown.Token);
+            await output.WriteLineAsync("scheduler stopped");
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
+            sigterm?.Dispose();
+            sigint?.Dispose();
+        }
+
+        return 0;
+    }
+
+    private static async Task WriteRunResultsAsync(
+        CliOptions options,
+        RootConfig config,
+        IReadOnlyList<JobRunResult> results,
+        TextWriter output)
+    {
         if (options.Json)
         {
             await output.WriteLineAsync(JsonSerializer.Serialize(new
             {
-                dryRun = options.DryRun || loaded.Config.Defaults.DryRun == true,
+                dryRun = options.DryRun || config.Defaults.DryRun == true,
                 jobs = results.Select(result => new
                 {
                     name = result.JobName,
@@ -369,41 +487,402 @@ public static class CliApplication
                     }),
                 }),
             }, JsonOptions));
+            return;
         }
-        else
+
+        foreach (var result in results)
         {
-            foreach (var result in results)
+            await output.WriteLineAsync($"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}");
+            if (!string.IsNullOrEmpty(result.ArchiveName))
             {
-                await output.WriteLineAsync($"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}");
-                if (!string.IsNullOrEmpty(result.ArchiveName))
+                await output.WriteLineAsync($"  archive: {result.ArchiveName}");
+            }
+
+            foreach (var destination in result.Destinations)
+            {
+                await output.WriteLineAsync(
+                    $"  {destination.Name}: {(destination.Success ? "ok" : "failed")} " +
+                    $"uploaded={destination.Uploaded.Count} promoted={destination.Promoted.Count} deleted={destination.Deleted.Count}");
+                if (destination.Error is not null)
                 {
-                    await output.WriteLineAsync($"  archive: {result.ArchiveName}");
+                    await output.WriteLineAsync($"    error: {destination.Error}");
+                }
+            }
+
+            if (result.Error is not null && result.Destinations.All(destination => destination.Error is null))
+            {
+                await output.WriteLineAsync($"  error: {result.Error}");
+            }
+        }
+    }
+
+    private static async Task<int> PruneCommandAsync(
+        CliOptions options,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var loaded = Load(options);
+        var validation = new ConfigValidator().Validate(loaded.Config);
+        WriteWarnings(loaded, validation, error);
+        if (!validation.IsValid)
+        {
+            foreach (var validationError in validation.Errors)
+            {
+                await error.WriteLineAsync($"error: {validationError.Path}: {validationError.Message}");
+            }
+
+            return 2;
+        }
+
+        var jobs = FilterJobs(loaded.Config, options.Job);
+        if (jobs.Count == 0)
+        {
+            await error.WriteLineAsync($"error: job '{options.Job}' not found");
+            return 2;
+        }
+
+        var apply = options.Apply && !options.DryRun && loaded.Config.Defaults.DryRun != true;
+        var now = DateTimeOffset.UtcNow;
+        var factory = CreateStorageFactory();
+        var results = new List<object>();
+        var failures = new List<string>();
+
+        foreach (var job in jobs)
+        {
+            var timezone = ResolveTimezone(job.Timezone ?? loaded.Config.Defaults.Timezone ?? "UTC");
+            foreach (var destination in job.Destinations)
+            {
+                var policy = RetentionResolver.Resolve(
+                    loaded.Config.Defaults.Retention,
+                    job.Retention,
+                    destination.Retention);
+                if (!policy.Enabled)
+                {
+                    continue;
                 }
 
-                foreach (var destination in result.Destinations)
+                await using var backend = await factory.CreateAsync(job, destination, cancellationToken);
+                var plan = await RetentionService.PlanAsync(
+                    backend,
+                    policy,
+                    now,
+                    timezone,
+                    currentKey: null,
+                    cancellationToken);
+
+                var aborted = plan.Prune.Where(item => item.Aborted).ToList();
+                if (aborted.Count > 0)
                 {
-                    await output.WriteLineAsync(
-                        $"  {destination.Name}: {(destination.Success ? "ok" : "failed")} " +
-                        $"uploaded={destination.Uploaded.Count} promoted={destination.Promoted.Count} deleted={destination.Deleted.Count}");
-                    if (destination.Error is not null)
-                    {
-                        await output.WriteLineAsync($"    error: {destination.Error}");
-                    }
+                    failures.Add(
+                        $"{job.Name}/{destination.Name}: retention candidates exceed max_delete " +
+                        $"({string.Join(", ", aborted.Select(item => $"{item.Tier}={item.Candidates.Count}/{item.MaxDelete}"))})");
                 }
 
-                if (result.Error is not null && result.Destinations.All(destination => destination.Error is null))
+                IReadOnlyList<string> deleted = Array.Empty<string>();
+                if (apply && aborted.Count == 0)
                 {
-                    await output.WriteLineAsync($"  error: {result.Error}");
+                    deleted = await RetentionService.ApplyAsync(backend, plan, cancellationToken);
+                }
+
+                var candidates = plan.Prune
+                    .SelectMany(item => item.Candidates)
+                    .Select(item => item.Key)
+                    .ToList();
+
+                results.Add(new
+                {
+                    job = job.Name,
+                    destination = destination.Name,
+                    apply,
+                    aborted = aborted.Count > 0,
+                    candidates,
+                    deleted,
+                });
+
+                if (options.Json)
+                {
+                    continue;
+                }
+
+                await output.WriteLineAsync(
+                    $"{job.Name}/{destination.Name}: candidates={candidates.Count} " +
+                    $"deleted={deleted.Count} mode={(apply ? "apply" : "dry-run")}");
+                foreach (var key in candidates)
+                {
+                    await output.WriteLineAsync($"  - {key}");
                 }
             }
         }
 
-        if (results.Any(result => result.Status == JobRunStatus.Locked))
+        foreach (var failure in failures)
         {
-            return 4;
+            await error.WriteLineAsync($"error: {failure}");
         }
 
-        return results.All(result => result.Status is JobRunStatus.Success or JobRunStatus.Skipped) ? 0 : 3;
+        if (options.Json)
+        {
+            await output.WriteLineAsync(JsonSerializer.Serialize(new
+            {
+                apply,
+                failures,
+                results,
+            }, JsonOptions));
+        }
+
+        return failures.Count > 0 ? 3 : 0;
+    }
+
+    private static async Task<int> RestoreCommandAsync(
+        CliOptions options,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var loaded = Load(options);
+        var validation = new ConfigValidator().Validate(loaded.Config);
+        WriteWarnings(loaded, validation, error);
+        if (!validation.IsValid)
+        {
+            foreach (var validationError in validation.Errors)
+            {
+                await error.WriteLineAsync($"error: {validationError.Path}: {validationError.Message}");
+            }
+
+            return 2;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Job))
+        {
+            await error.WriteLineAsync("error: restore requires --job");
+            return 1;
+        }
+
+        var job = loaded.Config.FindJob(options.Job);
+        if (job is null)
+        {
+            await error.WriteLineAsync($"error: job '{options.Job}' not found");
+            return 2;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.To))
+        {
+            await error.WriteLineAsync("error: restore requires --to");
+            return 1;
+        }
+
+        if (options.Latest == (options.Key is not null))
+        {
+            await error.WriteLineAsync("error: restore requires exactly one of --latest or --key");
+            return 1;
+        }
+
+        var destination = options.Destination is null
+            ? job.Destinations.FirstOrDefault()
+            : job.Destinations.FirstOrDefault(item =>
+                string.Equals(item.Name, options.Destination, StringComparison.Ordinal));
+        if (destination is null)
+        {
+            await error.WriteLineAsync($"error: destination '{options.Destination}' not found");
+            return 2;
+        }
+
+        var tier = NormalizeTier(options.Tier);
+        var factory = CreateStorageFactory();
+        await using var backend = await factory.CreateAsync(job, destination, cancellationToken);
+
+        string key;
+        if (options.Latest)
+        {
+            var objects = await backend.ListAsync(tier, cancellationToken);
+            var latest = objects.OrderByDescending(item => item.Modified).FirstOrDefault();
+            if (latest is null)
+            {
+                await error.WriteLineAsync($"error: no objects found in {tier}");
+                return 3;
+            }
+
+            key = latest.Key;
+        }
+        else
+        {
+            key = options.Key!.StartsWith($"{tier}/", StringComparison.Ordinal)
+                ? options.Key
+                : $"{tier}/{options.Key}";
+        }
+
+        var destinationRoot = Path.GetFullPath(options.To);
+        Directory.CreateDirectory(destinationRoot);
+
+        if (options.Extract)
+        {
+            var temporaryPath = Path.Combine(
+                Path.GetTempPath(),
+                "cron-backup",
+                $"restore-{Guid.NewGuid():N}.tar.gz");
+            Directory.CreateDirectory(Path.GetDirectoryName(temporaryPath)!);
+            try
+            {
+                await backend.DownloadAsync(key, temporaryPath, cancellationToken);
+                await TarExtractor.ExtractTarGzAsync(temporaryPath, destinationRoot, cancellationToken);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+
+            await output.WriteLineAsync($"restored {key} to {destinationRoot}");
+        }
+        else
+        {
+            var targetPath = Path.Combine(destinationRoot, Path.GetFileName(key));
+            await backend.DownloadAsync(key, targetPath, cancellationToken);
+            await output.WriteLineAsync($"downloaded {key} to {targetPath}");
+        }
+
+        return 0;
+    }
+
+    private static async Task<int> ListRemoteAsync(
+        RootConfig config,
+        IReadOnlyList<JobConfig> jobs,
+        CliOptions options,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var factory = CreateStorageFactory();
+        var tiers = options.Tier is null
+            ? new[] { "daily", "weekly", "monthly" }
+            : new[] { NormalizeTier(options.Tier) };
+        var rows = new List<RemoteRow>();
+
+        foreach (var job in jobs)
+        {
+            foreach (var destination in job.Destinations)
+            {
+                if (options.Destination is not null &&
+                    !string.Equals(destination.Name, options.Destination, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                await using var backend = await factory.CreateAsync(job, destination, cancellationToken);
+                foreach (var tier in tiers)
+                {
+                    var objects = await backend.ListAsync(tier, cancellationToken);
+                    rows.AddRange(objects.Select(item => new RemoteRow(
+                        job.Name,
+                        destination.Name,
+                        tier,
+                        item.Key,
+                        item.Size,
+                        item.Modified)));
+                }
+            }
+        }
+
+        if (options.Json)
+        {
+            await output.WriteLineAsync(JsonSerializer.Serialize(new { objects = rows }, JsonOptions));
+            return 0;
+        }
+
+        if (rows.Count == 0)
+        {
+            await output.WriteLineAsync("no remote objects found");
+            return 0;
+        }
+
+        foreach (var row in rows)
+        {
+            await output.WriteLineAsync(
+                $"{row.Job}/{row.Destination} {row.Tier} {row.Key} {row.Size} {row.Modified:O}");
+        }
+
+        return 0;
+    }
+
+    private sealed record RemoteRow(
+        string Job,
+        string Destination,
+        string Tier,
+        string Key,
+        long Size,
+        DateTimeOffset Modified);
+
+    private static RcloneStorageBackendFactory CreateStorageFactory()
+    {
+        var processRunner = new SystemProcessRunner();
+        return new RcloneStorageBackendFactory(
+            new RcloneConfRenderer(),
+            new RcloneProcessSecretObscurer(),
+            processRunner);
+    }
+
+    private static string NormalizeTier(string? tier)
+    {
+        var normalized = (tier ?? "daily").ToLowerInvariant();
+        return normalized is "daily" or "weekly" or "monthly"
+            ? normalized
+            : throw new ConfigException("--tier", "expected daily, weekly or monthly");
+    }
+
+    private static TimeZoneInfo ResolveTimezone(string timezone)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timezone);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            throw new ConfigException("timezone", $"unknown timezone '{timezone}'");
+        }
+        catch (InvalidTimeZoneException)
+        {
+            throw new ConfigException("timezone", $"invalid timezone '{timezone}'");
+        }
+    }
+
+    private static async Task<int> HealthCommandAsync(
+        CliOptions options,
+        TextWriter output,
+        TextWriter error)
+    {
+        var store = new FileHealthStore(
+            Environment.GetEnvironmentVariable("CRONBACKUP_STATUS_FILE"));
+        var state = await store.ReadAsync(CancellationToken.None);
+        var result = HealthEvaluator.Evaluate(
+            state,
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromSeconds(90),
+            options.Strict);
+
+        if (options.Json)
+        {
+            await output.WriteLineAsync(JsonSerializer.Serialize(new
+            {
+                healthy = result.Healthy,
+                statusFile = store.FilePath,
+                errors = result.Errors,
+            }, JsonOptions));
+        }
+        else if (result.Healthy)
+        {
+            await output.WriteLineAsync("healthy");
+        }
+        else
+        {
+            foreach (var healthError in result.Errors)
+            {
+                await error.WriteLineAsync($"unhealthy: {healthError}");
+            }
+        }
+
+        return result.Healthy ? 0 : 1;
     }
 
     private static LogLevel ParseLogLevel(string? value) =>

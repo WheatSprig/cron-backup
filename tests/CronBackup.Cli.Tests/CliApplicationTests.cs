@@ -134,6 +134,103 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task Prune_ShouldDefaultToDryRunAndApplyWhenRequested()
+    {
+        using var temp = new TestTempDirectory();
+        var source = Path.Combine(temp.Path, "source");
+        var destination = Path.Combine(temp.Path, "remote");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(Path.Combine(destination, "daily"));
+        var oldFile = Path.Combine(destination, "daily", "backup_old.tar.gz");
+        var newFile = Path.Combine(destination, "daily", "backup_new.tar.gz");
+        await File.WriteAllTextAsync(oldFile, "old");
+        await File.WriteAllTextAsync(newFile, "new");
+        File.SetLastWriteTimeUtc(oldFile, DateTime.UtcNow.AddDays(-10));
+        File.SetLastWriteTimeUtc(newFile, DateTime.UtcNow.AddDays(-1));
+        var jobName = $"prune-{Guid.NewGuid():N}";
+        var config = $"""
+            version: 1
+            defaults:
+              retention:
+                daily: 1
+                max_delete: 10
+            jobs:
+              - name: {jobName}
+                source:
+                  path: "{source.Replace('\\', '/')}"
+                destinations:
+                  - name: local
+                    kind: local
+                    path: "{destination.Replace('\\', '/')}"
+            """;
+        var path = temp.WriteFile("config.yaml", config);
+
+        var dryRunOutput = new StringWriter();
+        var dryRunExit = await CliApplication.RunAsync(
+            ["prune", "--config", path],
+            dryRunOutput,
+            new StringWriter(),
+            CancellationToken.None);
+
+        Assert.Equal(0, dryRunExit);
+        Assert.True(File.Exists(oldFile));
+        Assert.Contains("backup_old.tar.gz", dryRunOutput.ToString(), StringComparison.Ordinal);
+
+        var applyOutput = new StringWriter();
+        var applyExit = await CliApplication.RunAsync(
+            ["prune", "--config", path, "--apply"],
+            applyOutput,
+            new StringWriter(),
+            CancellationToken.None);
+
+        Assert.Equal(0, applyExit);
+        Assert.False(File.Exists(oldFile));
+        Assert.True(File.Exists(newFile));
+    }
+
+    [Fact]
+    public async Task Restore_ShouldDownloadAndExtractLatestArchive()
+    {
+        using var temp = new TestTempDirectory();
+        var source = Path.Combine(temp.Path, "source");
+        var destination = Path.Combine(temp.Path, "remote");
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "data.txt"), "restored data");
+        var jobName = $"restore-{Guid.NewGuid():N}";
+        var config = $"""
+            version: 1
+            jobs:
+              - name: {jobName}
+                source:
+                  path: "{source.Replace('\\', '/')}"
+                destinations:
+                  - name: local
+                    kind: local
+                    path: "{destination.Replace('\\', '/')}"
+            """;
+        var path = temp.WriteFile("config.yaml", config);
+
+        var runExit = await CliApplication.RunAsync(
+            ["run", "--once", "--config", path, "--log-level", "error"],
+            new StringWriter(),
+            new StringWriter(),
+            CancellationToken.None);
+        Assert.Equal(0, runExit);
+
+        var restoreDirectory = Path.Combine(temp.Path, "restore");
+        var restoreOutput = new StringWriter();
+        var restoreExit = await CliApplication.RunAsync(
+            ["restore", "--job", jobName, "--latest", "--to", restoreDirectory, "--extract", "--config", path],
+            restoreOutput,
+            new StringWriter(),
+            CancellationToken.None);
+
+        Assert.Equal(0, restoreExit);
+        Assert.Equal("restored data", await File.ReadAllTextAsync(Path.Combine(restoreDirectory, "data.txt")));
+        Assert.Contains("restored", restoreOutput.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UnknownCommand_ShouldReturnOne()
     {
         var error = new StringWriter();

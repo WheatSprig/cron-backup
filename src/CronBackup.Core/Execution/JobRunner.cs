@@ -1,4 +1,5 @@
 using CronBackup.Core.Configuration;
+using CronBackup.Core.Health;
 using CronBackup.Core.Retention;
 using CronBackup.Core.Storage;
 using Microsoft.Extensions.Logging;
@@ -43,6 +44,7 @@ public sealed class JobRunner
     private readonly ILogger<JobRunner> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly RetryPolicy _retryPolicy;
+    private readonly IHealthStore? _healthStore;
 
     public JobRunner(
         IArchiveService archiveService,
@@ -52,7 +54,8 @@ public sealed class JobRunner
         INotifier notifier,
         ILogger<JobRunner> logger,
         TimeProvider? timeProvider = null,
-        RetryPolicy? retryPolicy = null)
+        RetryPolicy? retryPolicy = null,
+        IHealthStore? healthStore = null)
     {
         _archiveService = archiveService;
         _storageFactory = storageFactory;
@@ -62,6 +65,7 @@ public sealed class JobRunner
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _retryPolicy = retryPolicy ?? new RetryPolicy();
+        _healthStore = healthStore;
     }
 
     public async Task<JobRunResult> RunAsync(
@@ -75,6 +79,7 @@ public sealed class JobRunner
             return new JobRunResult(job.Name, JobRunStatus.Skipped, null, Array.Empty<DestinationRunResult>(), null);
         }
 
+        var startedAt = _timeProvider.GetUtcNow();
         await using var lockResult = await _lockFactory.TryAcquireAsync(job.Name, cancellationToken);
         if (!lockResult.Acquired)
         {
@@ -198,12 +203,48 @@ public sealed class JobRunner
             archiveName,
             destinationResults.Select(result => result.Name).ToList());
 
+        await UpdateHealthAsync(job, startedAt, success, error);
+
         return new JobRunResult(
             job.Name,
             success ? JobRunStatus.Success : JobRunStatus.Failed,
             archiveName,
             destinationResults,
             error);
+    }
+
+    private async Task UpdateHealthAsync(
+        JobConfig job,
+        DateTimeOffset startedAt,
+        bool success,
+        string? error)
+    {
+        if (_healthStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _healthStore.UpdateAsync(
+                state =>
+                {
+                    state.LastRun = new JobHealthSnapshot
+                    {
+                        Job = job.Name,
+                        StartedAt = startedAt,
+                        FinishedAt = _timeProvider.GetUtcNow(),
+                        Success = success,
+                        Error = error,
+                    };
+                    state.ConsecutiveFailures = success ? 0 : state.ConsecutiveFailures + 1;
+                },
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "failed to update health status: job={Job}", job.Name);
+        }
     }
 
     private async Task<DestinationRunResult> RunDestinationAsync(

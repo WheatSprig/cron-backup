@@ -12,6 +12,10 @@ public sealed class CliOptions
 
     public string? To { get; init; }
 
+    public string? Tier { get; init; }
+
+    public string? Destination { get; init; }
+
     public string? LogLevel { get; init; }
 
     public bool Json { get; init; }
@@ -19,6 +23,8 @@ public sealed class CliOptions
     public bool DryRun { get; init; }
 
     public bool Online { get; init; }
+
+    public bool Remote { get; init; }
 
     public bool Strict { get; init; }
 
@@ -44,10 +50,13 @@ public sealed class CliOptions
         string? job = null;
         string? key = null;
         string? to = null;
+        string? tier = null;
+        string? destination = null;
         string? logLevel = null;
         var json = false;
         var dryRun = false;
         var online = false;
+        var remote = false;
         var strict = false;
         var once = false;
         var apply = false;
@@ -87,6 +96,12 @@ public sealed class CliOptions
                 case "--to":
                     to = Value();
                     break;
+                case "--tier":
+                    tier = Value();
+                    break;
+                case "--destination":
+                    destination = Value();
+                    break;
                 case "--log-level":
                     logLevel = Value();
                     break;
@@ -98,6 +113,9 @@ public sealed class CliOptions
                     break;
                 case "--online":
                     online = true;
+                    break;
+                case "--remote":
+                    remote = true;
                     break;
                 case "--strict":
                     strict = true;
@@ -140,10 +158,13 @@ public sealed class CliOptions
             Job = job,
             Key = key,
             To = to,
+            Tier = tier,
+            Destination = destination,
             LogLevel = logLevel,
             Json = json,
             DryRun = dryRun,
             Online = online,
+            Remote = remote,
             Strict = strict,
             Once = once,
             Apply = apply,
