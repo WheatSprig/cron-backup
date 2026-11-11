@@ -1,0 +1,39 @@
+version: 1
+
+defaults:
+  timezone: UTC
+  log_target: console
+  dry_run: false
+  retention:
+    daily: 2
+    weekly: 1
+    monthly: 1
+    max_delete: 10
+  archive:
+    format: tar.gz
+    temp_dir: /tmp
+
+jobs:
+  - name: integration
+    source:
+      path: /data
+    verify: checksum
+    destinations:
+      - name: s3
+        kind: s3
+        provider: Minio
+        endpoint: http://minio:9000
+        region: us-east-1
+        bucket: backups
+        root: integration
+        access_key_id: ${S3_KEY}
+        secret_access_key: ${S3_SECRET}
+        no_check_bucket: false
+      - name: sftp
+        kind: sftp
+        host: sftp
+        port: 22
+        user: testuser
+        password: ${SFTP_PASS}
+        known_hosts_file: none
+        root: backup/integration

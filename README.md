@@ -371,8 +371,12 @@ dotnet build
 dotnet test
 dotnet run --project src/CronBackup.Cli -- validate --config samples/config.example.yaml
 dotnet run --project src/CronBackup.Cli -- plan --config samples/config.example.yaml
+
+# 真实 MinIO + SFTP 集成测试（需要 Docker）
+bash tests/integration/run.sh
 ```
 
+集成测试说明见 [`tests/integration/README.md`](tests/integration/README.md)。
 仓库约定见 [`AGENTS.md`](AGENTS.md)。
 
 ---
