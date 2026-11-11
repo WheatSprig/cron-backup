@@ -59,6 +59,7 @@ public sealed class CliApplicationTests
         Assert.Contains("job photos", text, StringComparison.Ordinal);
         Assert.Contains("daily=7", text, StringComparison.Ordinal);
         Assert.Contains("local", text, StringComparison.Ordinal);
+        Assert.Contains("path=/backups", text, StringComparison.Ordinal);
         Assert.DoesNotContain("secret", text, StringComparison.OrdinalIgnoreCase);
     }
 
