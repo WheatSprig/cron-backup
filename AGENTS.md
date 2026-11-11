@@ -11,10 +11,9 @@ tools: [YamlDotNet, Cronos, xUnit, rclone]
 本文件面向要改这份代码的人和自动化助手，约定仓库边界、配置语义、保留策略、
 测试方式与提交纪律。**若本文与实际代码不一致，以代码为准，并顺手把本文改掉。**
 
-当前状态：仓库里仍然只有 v1 的 shell + rclone 脚本；v2 代码尚未落地。
-v1 的 `backup.sh` / `entrypoint.sh` / `generate-config.sh` 由 `v1` tag 保留；
-在 tag 创建前不要删除这些文件。v2 的目录结构、配置模型与实施顺序见
-`.agents/plans/` 下的计划文件（不提交）。
+当前状态：v2 的配置、执行管线、rclone 后端、调度、prune/restore/health 与
+Dockerfile 已落地；v1 的三个 shell 脚本已删除，只能从 `v1` tag 取回。
+v2 的目录结构、配置模型与剩余工作见 `.agents/plans/` 下的计划文件（不提交）。
 
 ---
 
@@ -129,7 +128,7 @@ bool SupportsServerSideCopy { get; }
 - SFTP 的 `pass` 在 rclone.conf 中必须是 obscured 值。通过 `rclone obscure -`
   从 stdin 传入，**绝不放进 argv**。
 - 临时 rclone.conf：目录 `0700`、文件 `0600`，退出即删；启动时清扫过期残留。
-- 不设置全局 `RCLONE_CONFIG`，每次调用显式 `--config <tmp>` 并加 `--non-interactive`。
+- 不设置全局 `RCLONE_CONFIG`，每次调用显式 `--config <tmp>` 并加 `--ask-password=false`。
 - 不要记录 rclone 命令中的完整 key 之外的敏感信息；conf 内容永不进日志。
 
 ---

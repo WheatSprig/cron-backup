@@ -1,0 +1,70 @@
+version: 1
+
+defaults:
+  timezone: Asia/Shanghai
+  log_target: console
+  dry_run: false
+  retention:
+    daily: 7
+    weekly: 4
+    monthly: 6
+    max_delete: 20
+  archive:
+    format: tar.gz
+    temp_dir: /tmp
+
+jobs:
+  - name: photos
+    schedule: "0 2 * * *"
+    timezone: Asia/Shanghai
+    source:
+      path: /backup/data
+    verify: size
+
+    destinations:
+      - name: s3-main
+        kind: s3
+        provider: Minio
+        endpoint: https://s3.example.com
+        region: us-east-1
+        bucket: backups
+        root: photos
+        access_key_id: ${S3_ACCESS_KEY_ID}
+        secret_access_key: ${S3_SECRET_ACCESS_KEY}
+        acl: private
+        no_check_bucket: true
+        retention:
+          daily: 30
+          weekly: 12
+          monthly: 24
+          max_delete: 50
+
+      - name: nas
+        kind: sftp
+        host: nas.local
+        port: 22
+        user: backup
+        password: ${SFTP_PASSWORD}
+        # 建议挂载 known_hosts 并启用主机密钥校验；测试环境才用 "none"
+        # known_hosts_file: /config/known_hosts
+        root: /volume1/backup/photos
+
+    hooks:
+      timeout_seconds: 300
+      pre:
+        - run: /backup/hooks/db-dump.sh
+          args: ["--full"]
+          timeout_seconds: 600
+          env:
+            PGPASSWORD: ${PGPASSWORD}
+      post:
+        - run: /backup/hooks/cleanup-local.sh
+
+    notify:
+      - kind: ntfy
+        url: ${NTFY_URL}
+        topic: backups
+      - kind: healthchecks
+        url: ${HEALTHCHECKS_URL}
+      - kind: webhook
+        url: ${WEBHOOK_URL}
