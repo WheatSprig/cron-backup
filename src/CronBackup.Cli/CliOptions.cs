@@ -87,23 +87,44 @@ public sealed class CliOptions
                 case "--config":
                     configPath = Value();
                     break;
+                case var value when value.StartsWith("--config=", StringComparison.Ordinal):
+                    configPath = value["--config=".Length..];
+                    break;
                 case "--job":
                     job = Value();
+                    break;
+                case var value when value.StartsWith("--job=", StringComparison.Ordinal):
+                    job = value["--job=".Length..];
                     break;
                 case "--key":
                     key = Value();
                     break;
+                case var value when value.StartsWith("--key=", StringComparison.Ordinal):
+                    key = value["--key=".Length..];
+                    break;
                 case "--to":
                     to = Value();
+                    break;
+                case var value when value.StartsWith("--to=", StringComparison.Ordinal):
+                    to = value["--to=".Length..];
                     break;
                 case "--tier":
                     tier = Value();
                     break;
+                case var value when value.StartsWith("--tier=", StringComparison.Ordinal):
+                    tier = value["--tier=".Length..];
+                    break;
                 case "--destination":
                     destination = Value();
                     break;
+                case var value when value.StartsWith("--destination=", StringComparison.Ordinal):
+                    destination = value["--destination=".Length..];
+                    break;
                 case "--log-level":
                     logLevel = Value();
+                    break;
+                case var value when value.StartsWith("--log-level=", StringComparison.Ordinal):
+                    logLevel = value["--log-level=".Length..];
                     break;
                 case "--json":
                     json = true;
