@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- 保留策略按本地日期去重，`daily/weekly/monthly` 的 N 从「运行次数」改回「天数」。
+- 候选超过 `max_delete` 时改为分批删除，并在 `run`/`prune` 输出里报告剩余数量。
+- 提升判定改用归档文件名里的时间戳，不再依赖后端 `Modified`。
+- `run` 与 `prune` 共用 `RetentionExecutor`，删除重复的清理实现。
+
 ## [2.1.0] - 2026-11-11
 
 ### Added

@@ -88,11 +88,13 @@ CLI > job(YAML) > env 默认 > 内置
 ### 3.3 retention
 
 - 全局 `defaults.retention` 可被 `job.retention` 逐字段覆盖。
-- 正整数 = 保留最新 N 个对象；`0` = 该 tier 关闭（不提升、不清理）；
-  `enabled: false` = 整个 job 关闭。
+- 正整数 = 保留最新 N **天**（按归档时间戳的本地日期去重，同一天多份只留最新一份）；
+  `0` = 该 tier 关闭（不提升、不清理）；`enabled: false` = 整个 job 关闭。
 - 未配置 retention 时**不清理**。隐式 job 永远默认关闭。
-- `max_delete` 是硬上限；候选超过上限时整批中止，不做部分删除。
-- 不要通过解析文件名里的日期来决定保留，使用对象元数据 `RemoteObject.Modified`。
+- `max_delete` 是单轮硬上限；候选超过上限时本轮只删上限数量，剩余在结果和日志里
+  报告，下次运行继续，**不要**整批放弃。
+- 日期优先取归档文件名里的时间戳（`ArchiveKey`），解析失败才回退到
+  `RemoteObject.Modified`；提升判定同样以 key 时间戳为准。
 
 ### 3.4 配置校验
 
@@ -140,7 +142,8 @@ bool SupportsServerSideCopy { get; }
 - 远端布局固定为 `<root>/daily/`、`<root>/weekly/`、`<root>/monthly/`。
 - 上传永远先落 `daily/`；周日 / 每月 1 号做服务端复制提升。
 - 提升要幂等：目标 key 已存在就跳过；补跑窗口用“最近 7/31 天”判断，避免同一周/月重复提升。
-- 清理只按 `Modified` 倒序保留最新 N 个，当前刚上传的对象永远受保护。
+- 清理按本地日期去重后保留最新 N 天（同一天只留最新一份），当前刚上传的对象永远受保护。
+- 单轮删除受 `max_delete` 限制，超出部分保留到下次；执行结果要带 `PendingDeletes`。
 - 删除前再次校验所有 key 都在目标 tier 前缀下；空前缀、root 解析失败一律拒绝。
 - 删除必须支持 `DRY_RUN` / `--dry-run`；手动 `prune` 默认 dry-run，`--apply` 才真删。
 

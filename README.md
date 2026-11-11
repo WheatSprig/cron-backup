@@ -213,20 +213,22 @@ jobs:
 
 解析顺序：`defaults < job < destination`，逐字段覆盖。
 
-- 正整数：保留最新 N 个对象；
+- 正整数：保留最新 N 天（按归档时间戳的本地日期去重，同一天多份只留最新一份）；
 - `0`：关闭该 tier，不提升也不清理；
 - `enabled: false`：当前作用域关闭；job 上关闭是硬关闭；
 - 不配置 retention：不提升、不清理；
-- 清理按对象 `Modified` 倒序，不解析文件名；
-- 候选数超过 `max_delete` 时整批中止；
+- 归档时间戳来自文件名（`backup_yyyyMMdd_HHmmss_fff.tar.gz`，兼容无毫秒旧名）；
+  解析不出来时才回退到对象 `Modified`；
+- 候选数超过 `max_delete` 时本轮只删 `max_delete` 个，剩余数量会在输出和日志里报告，
+  下次运行继续；
 - `prune` 手动执行默认 dry-run，加 `--apply` 才删除。
 
 远端布局：
 
 ```text
-<root>/daily/backup_20261111_020000.tar.gz
-<root>/weekly/backup_20261108_020000.tar.gz
-<root>/monthly/backup_20261101_020000.tar.gz
+<root>/daily/backup_20261111_020000_123.tar.gz
+<root>/weekly/backup_20261108_020000_123.tar.gz
+<root>/monthly/backup_20261101_020000_123.tar.gz
 ```
 
 周日和每月 1 号做服务端复制提升；错过时按最近 7/31 天补跑，目标 key 已存在则跳过。
