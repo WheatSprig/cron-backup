@@ -6,7 +6,7 @@
     <LangVersion>12.0</LangVersion>
     <InvariantGlobalization>false</InvariantGlobalization>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>2.0.0-alpha.1</Version>
+    <Version>2.0.0</Version>
     <Authors>WheatSprig</Authors>
     <RepositoryUrl>https://github.com/WheatSprig/cron-backup</RepositoryUrl>
   </PropertyGroup>
