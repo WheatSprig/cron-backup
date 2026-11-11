@@ -9,7 +9,9 @@ namespace CronBackup.Core.Retention;
 public static class ArchiveKey
 {
     private const string Prefix = "backup_";
-    private const string Suffix = ".tar.gz";
+
+    // 先匹配更长的后缀，避免将来增加别的 .tar 变体时误判。
+    private static readonly string[] Suffixes = { ".tar.gz", ".tar" };
 
     private static readonly string[] TimestampFormats =
     {
@@ -29,13 +31,18 @@ public static class ArchiveKey
         local = default;
 
         var name = FileName(key);
-        if (!name.StartsWith(Prefix, StringComparison.Ordinal) ||
-            !name.EndsWith(Suffix, StringComparison.Ordinal))
+        if (!name.StartsWith(Prefix, StringComparison.Ordinal))
         {
             return false;
         }
 
-        var stamp = name[Prefix.Length..^Suffix.Length];
+        var suffix = Suffixes.FirstOrDefault(item => name.EndsWith(item, StringComparison.Ordinal));
+        if (suffix is null)
+        {
+            return false;
+        }
+
+        var stamp = name[Prefix.Length..^suffix.Length];
         return DateTime.TryParseExact(
             stamp,
             TimestampFormats,

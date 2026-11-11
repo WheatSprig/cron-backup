@@ -16,7 +16,7 @@ public sealed class FakeArchiveService : IArchiveService
         Directory.CreateDirectory(directory);
         var archivePath = Path.Combine(
             directory,
-            $"backup_{request.Timestamp:yyyyMMdd_HHmmss_fff}.tar.gz");
+            ArchiveNaming.FileName(request.Timestamp, request.Format));
 
         File.WriteAllText(archivePath, "fake archive contents");
         File.SetLastWriteTimeUtc(archivePath, request.Timestamp.UtcDateTime);

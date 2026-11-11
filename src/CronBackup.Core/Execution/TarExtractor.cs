@@ -7,7 +7,8 @@ public static class TarExtractor
 {
     // 恢复的归档来自远端，不能信任条目路径。这里只接受目录和普通文件，
     // 每个条目都做 root 约束；符号链接/硬链接暂不支持，直接报错而不是冒险解压。
-    public static async Task ExtractTarGzAsync(
+    // 通过文件头判断是否 gzip，兼容 .tar.gz 与 archive.format: tar。
+    public static async Task ExtractAsync(
         string archivePath,
         string destination,
         CancellationToken cancellationToken)
@@ -22,8 +23,8 @@ public static class TarExtractor
             FileShare.Read,
             81920,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
-        using var reader = new TarReader(gzipStream, leaveOpen: false);
+        await using var gzipStream = await TryOpenGzipAsync(fileStream, cancellationToken);
+        using var reader = new TarReader((Stream?)gzipStream ?? fileStream, leaveOpen: true);
 
         TarEntry? entry;
         while ((entry = reader.GetNextEntry()) is not null)
@@ -64,6 +65,19 @@ public static class TarExtractor
                         $"archive entry type '{entry.EntryType}' is not supported for safe restore: {entry.Name}");
             }
         }
+    }
+
+    private static async Task<GZipStream?> TryOpenGzipAsync(
+        FileStream stream,
+        CancellationToken cancellationToken)
+    {
+        var header = new byte[2];
+        var read = await stream.ReadAsync(header.AsMemory(0, 2), cancellationToken);
+        stream.Position = 0;
+
+        return read == 2 && header[0] == 0x1f && header[1] == 0x8b
+            ? new GZipStream(stream, CompressionMode.Decompress)
+            : null;
     }
 
     private static bool IsWithin(string root, string candidate)

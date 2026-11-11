@@ -15,10 +15,9 @@ public sealed record PrunePlan(
     StorageTier Tier,
     IReadOnlyList<RemoteObject> Candidates,
     IReadOnlyList<RemoteObject> ToDelete,
-    IReadOnlyList<RemoteObject> Deferred,
-    int MaxDelete)
+    IReadOnlyList<RemoteObject> Deferred)
 {
-    /// <summary>候选超过 max_delete，本次只删前 max_delete 个，剩下的下次继续。</summary>
+    /// <summary>受全局 max_delete 预算限制，本轮删不完，剩下的下次继续。</summary>
     public bool Truncated => Deferred.Count > 0;
 }
 
@@ -59,14 +58,39 @@ public static class RetentionPlanner
 
         var promotion = BuildPromotion(policy, weekly, monthly, now, timezone);
 
-        var prune = new[]
-        {
-            BuildPrunePlan(StorageTier.Daily, daily, policy.Daily, policy.MaxDelete, currentKey, timezone),
-            BuildPrunePlan(StorageTier.Weekly, weekly, policy.Weekly, policy.MaxDelete, null, timezone),
-            BuildPrunePlan(StorageTier.Monthly, monthly, policy.Monthly, policy.MaxDelete, null, timezone),
-        };
+        // max_delete 是单轮全局预算，不是每档各一份。按 daily → weekly → monthly
+        // 顺序分配，用完后剩余候选留到下次运行继续。
+        var prune = ApplyDeleteBudget(
+            new[]
+            {
+                BuildPrunePlan(StorageTier.Daily, daily, policy.Daily, currentKey, timezone),
+                BuildPrunePlan(StorageTier.Weekly, weekly, policy.Weekly, null, timezone),
+                BuildPrunePlan(StorageTier.Monthly, monthly, policy.Monthly, null, timezone),
+            },
+            policy.MaxDelete);
 
         return new RetentionPlan(policy, promotion, prune);
+    }
+
+    private static IReadOnlyList<PrunePlan> ApplyDeleteBudget(
+        IReadOnlyList<PrunePlan> plans,
+        int maxDelete)
+    {
+        var remaining = Math.Max(0, maxDelete);
+        var budgeted = new List<PrunePlan>(plans.Count);
+
+        foreach (var plan in plans)
+        {
+            var take = Math.Min(plan.Candidates.Count, remaining);
+            budgeted.Add(plan with
+            {
+                ToDelete = plan.Candidates.Take(take).ToList(),
+                Deferred = plan.Candidates.Skip(take).ToList(),
+            });
+            remaining -= take;
+        }
+
+        return budgeted;
     }
 
     /// <summary>
@@ -104,7 +128,6 @@ public static class RetentionPlanner
         StorageTier tier,
         IReadOnlyList<RemoteObject> objects,
         int keep,
-        int maxDelete,
         string? protectedKey,
         TimeZoneInfo timezone)
     {
@@ -114,8 +137,7 @@ public static class RetentionPlanner
                 tier,
                 Array.Empty<RemoteObject>(),
                 Array.Empty<RemoteObject>(),
-                Array.Empty<RemoteObject>(),
-                maxDelete);
+                Array.Empty<RemoteObject>());
         }
 
         // 1) 按本地日期分组，每天一个“代表”（当天最新的一份）。
@@ -186,12 +208,12 @@ public static class RetentionPlanner
             .OrderBy(item => item.Key, StringComparer.Ordinal)
             .ToList();
 
-        // 6) 单次删除上限：截断而不是整批放弃，剩余留给下次运行。
-        var limit = Math.Max(0, maxDelete);
-        var toDelete = candidates.Take(limit).ToList();
-        var deferred = candidates.Skip(toDelete.Count).ToList();
-
-        return new PrunePlan(tier, candidates, toDelete, deferred, maxDelete);
+        // 6) 每档先把全部候选交出去，由 ApplyDeleteBudget 统一按全局预算截断。
+        return new PrunePlan(
+            tier,
+            candidates,
+            candidates,
+            Array.Empty<RemoteObject>());
     }
 
     private static DateOnly GetLocalDate(RemoteObject item, TimeZoneInfo timezone)

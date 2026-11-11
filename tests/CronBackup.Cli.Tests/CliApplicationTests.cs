@@ -135,6 +135,54 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task RunOnce_ShouldPreviewWithoutChanges_InDryRun()
+    {
+        using var temp = new TestTempDirectory();
+        var source = Path.Combine(temp.Path, "source");
+        var destination = Path.Combine(temp.Path, "remote");
+        var daily = Path.Combine(destination, "daily");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(daily);
+        File.WriteAllText(Path.Combine(source, "data.txt"), "data");
+        var oldFile = Path.Combine(daily, "backup_20260101_000000_000.tar.gz");
+        await File.WriteAllTextAsync(oldFile, "old");
+
+        var jobName = $"dryrun-{Guid.NewGuid():N}";
+        var config = $"""
+            version: 1
+            defaults:
+              timezone: UTC
+              retention:
+                daily: 1
+                max_delete: 20
+            jobs:
+              - name: {jobName}
+                source:
+                  path: "{source.Replace('\\', '/')}"
+                destinations:
+                  - name: local
+                    kind: local
+                    path: "{destination.Replace('\\', '/')}"
+            """;
+        var path = temp.WriteFile("config.yaml", config);
+        var output = new StringWriter();
+
+        var exitCode = await CliApplication.RunAsync(
+            ["run", "--once", "--dry-run", "--config", path, "--log-level", "error"],
+            output,
+            new StringWriter(),
+            CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("(dry-run)", text, StringComparison.Ordinal);
+        Assert.Contains("uploaded=1", text, StringComparison.Ordinal);
+        Assert.Contains("deleted=1", text, StringComparison.Ordinal);
+        Assert.True(File.Exists(oldFile));
+        Assert.Single(Directory.GetFiles(daily));
+    }
+
+    [Fact]
     public async Task Prune_ShouldDefaultToDryRunAndApplyWhenRequested()
     {
         using var temp = new TestTempDirectory();

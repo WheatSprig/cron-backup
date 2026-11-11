@@ -86,6 +86,42 @@ public sealed class JobRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldPreviewWithoutSideEffects_InDryRun()
+    {
+        using var temp = new TempDirectory();
+        var remote = Path.Combine(temp.Path, "remote");
+        var daily = Path.Combine(remote, "daily");
+        Directory.CreateDirectory(daily);
+        var oldPath = Path.Combine(daily, "backup_old.tar.gz");
+        await File.WriteAllTextAsync(oldPath, "old");
+        File.SetLastWriteTimeUtc(oldPath, Sunday.AddDays(-10).UtcDateTime);
+
+        var (runner, archive, notifier) = CreateRunner(temp);
+        var config = CreateConfig(temp, new RetentionPolicy { Daily = 1, MaxDelete = 20 });
+
+        var result = await runner.RunAsync(
+            config,
+            config.Jobs[0],
+            new JobRunOptions(DryRun: true),
+            CancellationToken.None);
+
+        Assert.Equal(JobRunStatus.Success, result.Status);
+        Assert.Empty(archive.Requests);
+        Assert.Empty(notifier.Calls);
+
+        var destination = Assert.Single(result.Destinations);
+        Assert.True(destination.Success);
+        var uploaded = Assert.Single(destination.Uploaded);
+        Assert.Equal("daily/backup_20261108_100000_000.tar.gz", uploaded);
+        Assert.Contains(destination.Deleted, key => key.EndsWith("backup_old.tar.gz", StringComparison.Ordinal));
+        Assert.Equal(0, destination.PendingDeletes);
+
+        // 预览不能真的删掉或上传任何东西。
+        Assert.True(File.Exists(oldPath));
+        Assert.Single(Directory.GetFiles(daily));
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldStopBeforeArchive_WhenPreHookFails()
     {
         using var temp = new TempDirectory();

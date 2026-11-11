@@ -479,11 +479,12 @@ public static class CliApplication
         IReadOnlyList<JobRunResult> results,
         TextWriter output)
     {
+        var dryRun = options.DryRun || config.Defaults.DryRun == true;
         if (options.Json)
         {
             await output.WriteLineAsync(JsonSerializer.Serialize(new
             {
-                dryRun = options.DryRun || config.Defaults.DryRun == true,
+                dryRun,
                 jobs = results.Select(result => new
                 {
                     name = result.JobName,
@@ -508,7 +509,9 @@ public static class CliApplication
 
         foreach (var result in results)
         {
-            await output.WriteLineAsync($"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}");
+            await output.WriteLineAsync(
+                $"{result.JobName}: {result.Status.ToString().ToLowerInvariant()}" +
+                (dryRun ? " (dry-run)" : string.Empty));
             if (!string.IsNullOrEmpty(result.ArchiveName))
             {
                 await output.WriteLineAsync($"  archive: {result.ArchiveName}");
@@ -748,15 +751,19 @@ public static class CliApplication
 
         if (options.Extract)
         {
+            // 扩展名只用于临时文件；真正的 gzip 判断在 TarExtractor 里按文件头做。
+            var temporaryExtension = key.EndsWith(".tar", StringComparison.Ordinal)
+                ? ".tar"
+                : ".tar.gz";
             var temporaryPath = Path.Combine(
                 Path.GetTempPath(),
                 "cron-backup",
-                $"restore-{Guid.NewGuid():N}.tar.gz");
+                $"restore-{Guid.NewGuid():N}{temporaryExtension}");
             Directory.CreateDirectory(Path.GetDirectoryName(temporaryPath)!);
             try
             {
                 await backend.DownloadAsync(key, temporaryPath, cancellationToken);
-                await TarExtractor.ExtractTarGzAsync(temporaryPath, destinationRoot, cancellationToken);
+                await TarExtractor.ExtractAsync(temporaryPath, destinationRoot, cancellationToken);
             }
             finally
             {

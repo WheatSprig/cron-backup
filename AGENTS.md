@@ -91,8 +91,8 @@ CLI > job(YAML) > env 默认 > 内置
 - 正整数 = 保留最新 N **天**（按归档时间戳的本地日期去重，同一天多份只留最新一份）；
   `0` = 该 tier 关闭（不提升、不清理）；`enabled: false` = 整个 job 关闭。
 - 未配置 retention 时**不清理**。隐式 job 永远默认关闭。
-- `max_delete` 是单轮硬上限；候选超过上限时本轮只删上限数量，剩余在结果和日志里
-  报告，下次运行继续，**不要**整批放弃。
+- `max_delete` 是单轮全局硬上限（三档合计），按 daily → weekly → monthly 顺序分配；
+  用完后的剩余候选在结果和日志里报告，下次运行继续，**不要**整批放弃。
 - 日期优先取归档文件名里的时间戳（`ArchiveKey`），解析失败才回退到
   `RemoteObject.Modified`；提升判定同样以 key 时间戳为准。
 
@@ -146,13 +146,16 @@ bool SupportsServerSideCopy { get; }
 - 单轮删除受 `max_delete` 限制，超出部分保留到下次；执行结果要带 `PendingDeletes`。
 - 删除前再次校验所有 key 都在目标 tier 前缀下；空前缀、root 解析失败一律拒绝。
 - 删除必须支持 `DRY_RUN` / `--dry-run`；手动 `prune` 默认 dry-run，`--apply` 才真删。
+- `run --dry-run` 也要走 `BuildPlanAsync` 输出预览，但不打包、不执行 hook、不写远端。
 
 ### 5.2 归档
 
 - Linux 上调用 GNU `tar`，保持 v1 的 `-C <source> .` 语义；
   纯 .NET 归档只作为跨平台测试替身，不作为默认生产路径。
 - 多 job 的临时归档使用独立目录；成功、失败、取消都要清理。
-- 归档名默认 `backup_<YYYYMMDD_HHMMSS>.tar.gz`，与 v1 保持可识别。
+- `archive.format` 支持 `tar.gz`（默认，`-czf`）和 `tar`（`-cf`，不压缩）；
+  源目录本身已是压缩文件时用 `tar`，避免二次压缩。
+- 归档名固定 `backup_<YYYYMMDD_HHMMSS_fff>.tar[.gz]`，与 v1 保持可识别。
 
 ### 5.3 hooks
 

@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## [2.1.2] - 2026-11-11
+
+### Added
+
+- `archive.format: tar`：只打包不压缩，适合源目录里已是 `.sql.gz` 的场景。
+- `run --dry-run` 现在会列出远端并输出将上传、将提升、将删除的预览。
+
+### Changed
+
+- `max_delete` 改为三档合计的单轮预算，按 daily → weekly → monthly 顺序分配，
+  不再出现一次运行删掉 3 倍上限的情况。
+
+### Fixed
+
+- 恢复时按文件头识别 gzip，兼容 `.tar` 归档。
+
 ## [2.1.1] - 2026-11-11
 
 ### Fixed

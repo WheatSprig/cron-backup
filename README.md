@@ -219,8 +219,8 @@ jobs:
 - 不配置 retention：不提升、不清理；
 - 归档时间戳来自文件名（`backup_yyyyMMdd_HHmmss_fff.tar.gz`，兼容无毫秒旧名）；
   解析不出来时才回退到对象 `Modified`；
-- 候选数超过 `max_delete` 时本轮只删 `max_delete` 个，剩余数量会在输出和日志里报告，
-  下次运行继续；
+- 候选超过 `max_delete` 时按 `daily → weekly → monthly` 顺序共用一个单轮预算：
+  本轮合计只删 `max_delete` 个，剩余数量会在输出和日志里报告，下次运行继续；
 - `prune` 手动执行默认 dry-run，加 `--apply` 才删除。
 
 远端布局：
@@ -232,6 +232,21 @@ jobs:
 ```
 
 周日和每月 1 号做服务端复制提升；错过时按最近 7/31 天补跑，目标 key 已存在则跳过。
+
+### archive
+
+```yaml
+archive:
+  format: tar.gz   # tar.gz（默认，压缩）或 tar（只打包）
+  temp_dir: /tmp
+  timeout_seconds: 21600
+```
+
+`format: tar` 只调用 `tar -cf`，不压缩，适合 source 目录里已经是 `.sql.gz`
+等压缩文件的场景（例如 postgres-backup-local），避免对 4 GB 的库压缩两遍。
+
+归档名固定为 `backup_<yyyyMMdd_HHmmss_fff>.tar.gz` 或 `.tar`，保留策略按名字里的
+时间戳判断日期。
 
 ### hooks
 
@@ -303,6 +318,9 @@ cron-backup list --remote --config /config/config.yaml
 # 预演清理
 cron-backup prune --config /config/config.yaml
 
+# 预演一次完整备份：打包、hook、上传都不会发生，只列远端并输出计划
+cron-backup run --once --dry-run --config /config/config.yaml
+
 # 实际清理
 cron-backup prune --config /config/config.yaml --apply
 
@@ -353,7 +371,7 @@ HEALTHCHECK CMD ["/app/cron-backup", "health"]
 - 运行时包含 rclone、GNU tar、bash、tzdata、ICU
 - 没有 crond
 - 支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`
-- 稳定版同时发布 `v2.1.1`、`2.1.1`、`2.1`、`2`、`latest`
+- 稳定版同时发布 `v2.1.2`、`2.1.2`、`2.1`、`2`、`latest`
 
 ```bash
 docker buildx build \
