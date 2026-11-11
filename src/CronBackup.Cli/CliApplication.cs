@@ -1018,9 +1018,15 @@ public static class CliApplication
                 config.Defaults.Retention,
                 job.Retention,
                 destination.Retention);
-            var location = destination.Kind.Equals("s3", StringComparison.OrdinalIgnoreCase)
-                ? $"bucket={destination.Bucket} root={destination.Root}"
-                : $"root={destination.Root}";
+            // 不同 kind 的定位字段不一样：local 用 path，sftp 用 host+root，
+            // s3 用 bucket+root，rclone 用 root。不要统一打印 root 造成空值。
+            var location = destination.Kind.ToLowerInvariant() switch
+            {
+                "s3" => $"bucket={destination.Bucket} root={destination.Root}",
+                "sftp" => $"host={destination.Host} root={destination.Root}",
+                "local" => $"path={destination.Path}",
+                _ => $"root={destination.Root}",
+            };
             output.WriteLine($"  - {destination.Name} [{destination.Kind}] {location}");
             output.WriteLine($"    retention: {DescribeRetention(retention)}");
         }
